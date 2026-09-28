@@ -158,7 +158,7 @@ export class SupabasePersistenceService {
     }
   }
 
-  private async postRow(table: string, payload: Record<string, any>): Promise<boolean> {
+  public async postRow(table: string, payload: Record<string, any>): Promise<boolean> {
     if (!this.isConfigured()) return false;
     try {
       const res = await fetch(`${this.url}/rest/v1/${table}`, {

@@ -44,7 +44,17 @@ export interface Signal {
   strategyVersion: string;
   analysisVersion: string;
   createdAt: number;
-  status: 'ACTIVE' | 'ARCHIVED';
+  status:
+    | 'ACTIVE'
+    | 'ARCHIVED'
+    | 'AWAITING_USER_DECISION'
+    | 'ENTERED'
+    | 'ACTIVE_TRACKING'
+    | 'CANCELLED_BY_USER'
+    | 'CLOSED_WIN'
+    | 'CLOSED_LOSS';
+  telegramMessageId?: string;
+  telegramChatId?: string;
 }
 
 export type RejectionClassification =

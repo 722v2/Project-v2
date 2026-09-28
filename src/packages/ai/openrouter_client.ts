@@ -51,9 +51,9 @@ export class OpenRouterClient {
       'https://openrouter.ai/api/v1'
     ).replace(/\/+$/, '');
     this.apiKey =
-      config?.apiKey ||
-      (typeof process !== 'undefined' ? process.env.OPENROUTER_API_KEY : '') ||
-      '';
+      config?.apiKey !== undefined
+        ? config.apiKey
+        : ((typeof process !== 'undefined' ? process.env.OPENROUTER_API_KEY : '') || '');
     this.model =
       config?.model ||
       (typeof process !== 'undefined' ? process.env.AI_MODEL : '') ||

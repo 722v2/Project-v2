@@ -92,7 +92,7 @@ export interface TradeOutcome {
   direction: SetupDirection;
   entryPrice: number;
   exitPrice: number;
-  exitReason: 'TP1' | 'TP2' | 'SL' | 'EARLY_EXIT' | 'INVALIDATION' | 'EXPIRY' | 'MANUAL';
+  exitReason: 'TP1' | 'TP2' | 'SL' | 'EARLY_EXIT' | 'INVALIDATION' | 'EXPIRY' | 'MANUAL' | 'USER_CONFIRMED' | 'USER_CONFIRMED_WIN' | 'USER_CONFIRMED_LOSS';
   pnlUsd: number;
   realizedR: number;
   mfeR: number;
@@ -105,4 +105,5 @@ export interface TradeOutcome {
   analysisVersion: string;
   monitoringVersion: string;
   createdAt: number;
+  outcomeSource?: 'USER_CONFIRMED' | 'AUTOMATIC';
 }

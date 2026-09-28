@@ -14,6 +14,7 @@ import { RiskEngine } from '../packages/risk/risk_engine.ts';
 import { evaluateEvidenceScore } from '../packages/scoring/evidence_scorer.ts';
 import { generateSetupFingerprint, evaluateDeduplication } from '../packages/deduplication/fingerprint.ts';
 import { supabasePersistence } from '../packages/persistence/supabase_service.ts';
+import { telegramBotService } from '../packages/telegram/telegram_service.ts';
 
 export interface ScannerEventLog {
   id: string;
@@ -859,54 +860,22 @@ export class TradingEngine {
                   strategyVersion: SYSTEM_VERSIONS.strategyVersion,
                   analysisVersion: SYSTEM_VERSIONS.analysisVersion,
                   createdAt: Date.now(),
-                  status: 'ACTIVE',
-                };
-
-                const newTrade: Trade = {
-                  tradeId: `tr_${Date.now()}`,
-                  signalId: newSignal.signalId,
-                  setupId: fingerprint,
-                  symbol: 'XAU/USD',
-                  direction: 'BUY',
-                  entryPrice,
-                  stopLoss,
-                  takeProfit1,
-                  takeProfit2,
-                  plannedRiskUsd: riskEval.sizing?.plannedRiskUsd ?? 1.0,
-                  positionSizeLots: riskEval.sizing?.positionSizeLots ?? 0.01,
-                  status: 'ACTIVE',
-                  openedAt: Date.now(),
-                  createdAt: Date.now(),
-                };
-
-                const newPosition: TradePosition = {
-                  tradeId: newTrade.tradeId,
-                  currentMarketPrice: this.state.currentPrice,
-                  unrealizedPnlUsd: 0,
-                  currentRMultiple: 0,
-                  distanceToSl: Math.abs(entryPrice - stopLoss),
-                  distanceToTp1: Math.abs(takeProfit1 - entryPrice),
-                  distanceToTp2: Math.abs(takeProfit2 - entryPrice),
-                  mfePrice: entryPrice,
-                  mfeR: 0,
-                  maePrice: entryPrice,
-                  maeR: 0,
-                  tp1Hit: false,
-                  tp2Hit: false,
-                  slHit: false,
-                  isBreakeven: false,
-                  isPartialClosed: false,
-                  reversalWatchStatus: 'NORMAL',
-                  lastEvaluatedAt: Date.now(),
+                  status: 'AWAITING_USER_DECISION',
                 };
 
                 this.state.activeSignal = newSignal;
-                this.state.activeTrade = newTrade;
-                this.state.activePosition = newPosition;
                 this.state.recentSignals = [newSignal, ...this.state.recentSignals.slice(0, 19)];
 
-                this.addScannerLog(`تم توليد إشارة شراء مؤكدة (S1 Liquidity Sweep) عند $${entryPrice.toFixed(2)}`, 'success');
+                this.addScannerLog(`تم توليد إشارة شراء جديدة (S1 Liquidity Sweep) عند $${entryPrice.toFixed(2)} — بانتظار قرارك`, 'success');
                 supabasePersistence.persistSignal(newSignal).catch(() => {});
+
+                const trackingRecord = telegramBotService.registerSignal(newSignal);
+                telegramBotService.dispatchTelegramMessage(trackingRecord).then((res) => {
+                  if (res.messageId) {
+                    newSignal.telegramMessageId = res.messageId;
+                    supabasePersistence.persistSignal(newSignal).catch(() => {});
+                  }
+                }).catch(() => {});
               }
             }
           }
@@ -1057,6 +1026,192 @@ export class TradingEngine {
       supabasePersistence.persistTradeOutcome(outcome).catch(() => {});
     }
 
+    // Update active signal price in Telegram Service
+    if (this.state.activeSignal) {
+      telegramBotService.updateMarketPrice(this.state.activeSignal.signalId, current);
+    }
+
     this.notify();
+  }
+
+  // --- TELEGRAM LIFECYCLE BRIDGE METHODS ---
+
+  public confirmUserEntry(signalId: string): boolean {
+    const signal = this.state.activeSignal?.signalId === signalId
+      ? this.state.activeSignal
+      : this.state.recentSignals.find((s) => s.signalId === signalId);
+
+    if (!signal) return false;
+
+    signal.status = 'ACTIVE_TRACKING';
+
+    const newTrade: Trade = {
+      tradeId: `tr_${Date.now()}`,
+      signalId: signal.signalId,
+      setupId: signal.setupId,
+      symbol: signal.symbol,
+      direction: signal.direction,
+      entryPrice: signal.entryPrice,
+      stopLoss: signal.stopLoss,
+      takeProfit1: signal.takeProfit1,
+      takeProfit2: signal.takeProfit2,
+      plannedRiskUsd: 1.0,
+      positionSizeLots: 0.01,
+      status: 'ACTIVE',
+      openedAt: Date.now(),
+      createdAt: Date.now(),
+    };
+
+    const newPosition: TradePosition = {
+      tradeId: newTrade.tradeId,
+      currentMarketPrice: this.state.currentPrice || signal.entryPrice,
+      unrealizedPnlUsd: 0,
+      currentRMultiple: 0,
+      distanceToSl: Math.abs(signal.entryPrice - signal.stopLoss),
+      distanceToTp1: Math.abs(signal.takeProfit1 - signal.entryPrice),
+      distanceToTp2: Math.abs(signal.takeProfit2 - signal.entryPrice),
+      mfePrice: signal.entryPrice,
+      mfeR: 0,
+      maePrice: signal.entryPrice,
+      maeR: 0,
+      tp1Hit: false,
+      tp2Hit: false,
+      slHit: false,
+      isBreakeven: false,
+      isPartialClosed: false,
+      reversalWatchStatus: 'NORMAL',
+      lastEvaluatedAt: Date.now(),
+    };
+
+    this.state.activeTrade = newTrade;
+    this.state.activePosition = newPosition;
+    this.notify();
+    return true;
+  }
+
+  public cancelUserTracking(signalId: string): boolean {
+    const signal = this.state.activeSignal?.signalId === signalId
+      ? this.state.activeSignal
+      : this.state.recentSignals.find((s) => s.signalId === signalId);
+
+    if (signal) {
+      signal.status = 'CANCELLED_BY_USER';
+    }
+
+    if (this.state.activeTrade && this.state.activeTrade.signalId === signalId) {
+      this.state.activeTrade = null;
+      this.state.activePosition = null;
+    }
+
+    this.notify();
+    return true;
+  }
+
+  public confirmUserTradeWin(signalId: string): boolean {
+    const signal = this.state.activeSignal?.signalId === signalId
+      ? this.state.activeSignal
+      : this.state.recentSignals.find((s) => s.signalId === signalId);
+
+    if (signal) {
+      signal.status = 'CLOSED_WIN';
+    }
+
+    const trade = this.state.activeTrade;
+    const pos = this.state.activePosition;
+
+    if (trade && trade.signalId === signalId) {
+      const exitPrice = pos?.currentMarketPrice || trade.takeProfit1;
+      const diff = trade.direction === 'BUY' ? (exitPrice - trade.entryPrice) : (trade.entryPrice - exitPrice);
+      const slDist = Math.max(0.1, Math.abs(trade.entryPrice - trade.stopLoss));
+      const realizedR = Number((diff / slDist).toFixed(2));
+      const pnlUsd = Number((trade.positionSizeLots * 100 * diff).toFixed(2));
+
+      const outcome: TradeOutcome = {
+        id: `out_win_${Date.now()}`,
+        tradeId: trade.tradeId,
+        setupId: trade.setupId,
+        signalId: trade.signalId,
+        strategy: 'liquidity_sweep_reversal',
+        direction: trade.direction,
+        entryPrice: trade.entryPrice,
+        exitPrice,
+        exitReason: 'USER_CONFIRMED_WIN',
+        pnlUsd: Math.max(0, pnlUsd),
+        realizedR: Math.max(1.0, realizedR),
+        mfeR: pos?.mfeR || 1.5,
+        maeR: pos?.maeR || 0,
+        durationMinutes: Math.max(1, Math.round((Date.now() - (trade.openedAt || Date.now())) / 60000)),
+        marketRegime: this.state.regime.regime,
+        newsContext: {},
+        riskConfiguration: { source: 'USER_CONFIRMED' },
+        strategyVersion: SYSTEM_VERSIONS.strategyVersion,
+        analysisVersion: SYSTEM_VERSIONS.analysisVersion,
+        monitoringVersion: SYSTEM_VERSIONS.monitoringVersion,
+        createdAt: Date.now(),
+        outcomeSource: 'USER_CONFIRMED',
+      };
+
+      this.state.completedTrades = [outcome, ...this.state.completedTrades.slice(0, 49)];
+      this.state.activeTrade = null;
+      this.state.activePosition = null;
+      supabasePersistence.persistTradeOutcome(outcome).catch(() => {});
+    }
+
+    this.notify();
+    return true;
+  }
+
+  public confirmUserTradeLoss(signalId: string): boolean {
+    const signal = this.state.activeSignal?.signalId === signalId
+      ? this.state.activeSignal
+      : this.state.recentSignals.find((s) => s.signalId === signalId);
+
+    if (signal) {
+      signal.status = 'CLOSED_LOSS';
+    }
+
+    const trade = this.state.activeTrade;
+    const pos = this.state.activePosition;
+
+    if (trade && trade.signalId === signalId) {
+      const exitPrice = pos?.currentMarketPrice || trade.stopLoss;
+      const diff = trade.direction === 'BUY' ? (exitPrice - trade.entryPrice) : (trade.entryPrice - exitPrice);
+      const slDist = Math.max(0.1, Math.abs(trade.entryPrice - trade.stopLoss));
+      const realizedR = Number((diff / slDist).toFixed(2));
+      const pnlUsd = Number((trade.positionSizeLots * 100 * diff).toFixed(2));
+
+      const outcome: TradeOutcome = {
+        id: `out_loss_${Date.now()}`,
+        tradeId: trade.tradeId,
+        setupId: trade.setupId,
+        signalId: trade.signalId,
+        strategy: 'liquidity_sweep_reversal',
+        direction: trade.direction,
+        entryPrice: trade.entryPrice,
+        exitPrice,
+        exitReason: 'USER_CONFIRMED_LOSS',
+        pnlUsd: Math.min(0, pnlUsd),
+        realizedR: Math.min(-0.5, realizedR),
+        mfeR: pos?.mfeR || 0,
+        maeR: pos?.maeR || -1.0,
+        durationMinutes: Math.max(1, Math.round((Date.now() - (trade.openedAt || Date.now())) / 60000)),
+        marketRegime: this.state.regime.regime,
+        newsContext: {},
+        riskConfiguration: { source: 'USER_CONFIRMED' },
+        strategyVersion: SYSTEM_VERSIONS.strategyVersion,
+        analysisVersion: SYSTEM_VERSIONS.analysisVersion,
+        monitoringVersion: SYSTEM_VERSIONS.monitoringVersion,
+        createdAt: Date.now(),
+        outcomeSource: 'USER_CONFIRMED',
+      };
+
+      this.state.completedTrades = [outcome, ...this.state.completedTrades.slice(0, 49)];
+      this.state.activeTrade = null;
+      this.state.activePosition = null;
+      supabasePersistence.persistTradeOutcome(outcome).catch(() => {});
+    }
+
+    this.notify();
+    return true;
   }
 }
