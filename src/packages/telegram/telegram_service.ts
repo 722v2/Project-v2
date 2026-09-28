@@ -46,7 +46,7 @@ export interface CallbackQueryResult {
   updatedRecord?: TelegramTrackingRecord;
 }
 
-export type TelegramConnectionState = 'CONNECTED' | 'DISCONNECTED' | 'UNCONFIGURED' | 'CHECKING';
+export type TelegramConnectionState = 'CONNECTED' | 'DISCONNECTED' | 'UNCONFIGURED' | 'WAITING_FOR_START' | 'CHECKING';
 
 export interface TelegramStatusResult {
   state: TelegramConnectionState;
@@ -116,8 +116,6 @@ export class TelegramBotService {
   public getMissingConfigs(): string[] {
     const missing: string[] = [];
     if (!this.botToken) missing.push('TELEGRAM_BOT_TOKEN');
-    if (!this.authorizedChatId) missing.push('TELEGRAM_CHAT_ID');
-    if (!this.authorizedUserId) missing.push('TELEGRAM_USER_ID');
     return missing;
   }
 

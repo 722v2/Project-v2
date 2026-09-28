@@ -31,13 +31,184 @@ app.get('/api/health', (_req: Request, res: Response) => {
   });
 });
 
-// Helper: Identify missing Telegram environment variables
+// Helper: Identify missing Telegram environment variables (Only TELEGRAM_BOT_TOKEN is required)
 function getMissingTelegramConfigs(): string[] {
   const missing: string[] = [];
   if (!process.env.TELEGRAM_BOT_TOKEN) missing.push('TELEGRAM_BOT_TOKEN');
-  if (!process.env.TELEGRAM_CHAT_ID) missing.push('TELEGRAM_CHAT_ID');
-  if (!process.env.TELEGRAM_USER_ID) missing.push('TELEGRAM_USER_ID');
   return missing;
+}
+
+// Global server-side state for persisted and discovered Telegram credentials
+let persistedChatId = '';
+let persistedUserId = '';
+let discoveredChatId = '';
+let discoveredUserId = '';
+let persistedLoaded = false;
+
+// Helper: Get Telegram Chat ID following strict priority
+function getTelegramChatId(): string {
+  return (
+    process.env.TELEGRAM_CHAT_ID ||
+    persistedChatId ||
+    discoveredChatId ||
+    ''
+  );
+}
+
+// Helper: Get Telegram User ID following strict priority
+function getTelegramUserId(): string {
+  return (
+    process.env.TELEGRAM_USER_ID ||
+    persistedUserId ||
+    discoveredUserId ||
+    ''
+  );
+}
+
+// Helper: Load persisted Telegram configuration from Supabase
+async function loadPersistedTelegramChatId(): Promise<{ chatId?: string; userId?: string }> {
+  const url = process.env.SUPABASE_URL;
+  const key = process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_ANON_KEY;
+  if (!url || !key) return {};
+  try {
+    const res = await fetch(`${url.replace(/\/+$/, '')}/rest/v1/strategy_settings?order=strategy_id.asc`, {
+      headers: { apikey: key, Authorization: `Bearer ${key}` },
+    });
+    if (res.ok) {
+      const rows = await res.json();
+      if (Array.isArray(rows)) {
+        for (const row of rows) {
+          if (row.custom_params) {
+            if (row.custom_params.telegramChatId) {
+              return {
+                chatId: String(row.custom_params.telegramChatId),
+                userId: row.custom_params.telegramUserId ? String(row.custom_params.telegramUserId) : undefined,
+              };
+            }
+            if (row.custom_params._generalConfig && row.custom_params._generalConfig.telegramChatId) {
+              return {
+                chatId: String(row.custom_params._generalConfig.telegramChatId),
+                userId: row.custom_params._generalConfig.telegramUserId ? String(row.custom_params._generalConfig.telegramUserId) : undefined,
+              };
+            }
+          }
+        }
+      }
+    }
+  } catch (err) {
+    console.warn('[Telegram Persistence] Failed to load persisted telegram chat ID:', err);
+  }
+  return {};
+}
+
+// Helper: Persist discovered Chat ID & User ID permanently into Supabase
+async function persistDiscoveredTelegramChatId(chatId: string, userId?: string): Promise<boolean> {
+  persistedChatId = chatId;
+  discoveredChatId = chatId;
+  if (userId) {
+    persistedUserId = userId;
+    discoveredUserId = userId;
+  }
+
+  const url = process.env.SUPABASE_URL;
+  const key = process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_ANON_KEY;
+  if (!url || !key) {
+    console.log('[Telegram Discovery] Discovered Chat ID:', chatId, 'Saved in memory (Supabase not configured).');
+    return false;
+  }
+
+  try {
+    const res = await fetch(`${url.replace(/\/+$/, '')}/rest/v1/strategy_settings?strategy_id=eq.liquidity_sweep_reversal`, {
+      headers: { apikey: key, Authorization: `Bearer ${key}` },
+    });
+    let existingCustomParams: Record<string, any> = {};
+    if (res.ok) {
+      const rows = await res.json();
+      if (Array.isArray(rows) && rows[0] && rows[0].custom_params) {
+        existingCustomParams = rows[0].custom_params;
+      }
+    }
+
+    const updatedCustomParams = {
+      ...existingCustomParams,
+      telegramChatId: chatId,
+      telegramUserId: userId || existingCustomParams.telegramUserId,
+      _generalConfig: {
+        ...(existingCustomParams._generalConfig || {}),
+        telegramChatId: chatId,
+        telegramUserId: userId || existingCustomParams._generalConfig?.telegramUserId,
+      },
+    };
+
+    const updateRes = await fetch(`${url.replace(/\/+$/, '')}/rest/v1/strategy_settings?strategy_id=eq.liquidity_sweep_reversal`, {
+      method: 'PATCH',
+      headers: {
+        'Content-Type': 'application/json',
+        apikey: key,
+        Authorization: `Bearer ${key}`,
+        Prefer: 'return=minimal',
+      },
+      body: JSON.stringify({
+        custom_params: updatedCustomParams,
+        updated_at: new Date().toISOString(),
+      }),
+    });
+
+    if (updateRes.ok) {
+      console.log('[Telegram Discovery] Successfully persisted Chat ID:', chatId, 'to Supabase.');
+      return true;
+    } else {
+      console.warn('[Telegram Discovery] Failed to patch strategy_settings in Supabase:', updateRes.status);
+    }
+  } catch (err) {
+    console.warn('[Telegram Discovery] Error persisting to Supabase:', err);
+  }
+  return false;
+}
+
+// Helper: Automatically discover Chat ID from Telegram getUpdates API
+async function discoverTelegramChatId(token: string): Promise<{ chatId?: string; userId?: string; error?: string }> {
+  const existingChatId = getTelegramChatId();
+  if (existingChatId) {
+    return { chatId: existingChatId, userId: getTelegramUserId() };
+  }
+
+  try {
+    const res = await fetch(`https://api.telegram.org/bot${token}/getUpdates?limit=20`);
+    if (!res.ok) {
+      const data = await res.json().catch(() => ({}));
+      const rawDesc = data.description || `HTTP ${res.status}`;
+      return { error: sanitizeTelegramError(rawDesc) };
+    }
+
+    const data = await res.json().catch(() => ({}));
+    if (!data.ok || !Array.isArray(data.result)) {
+      return { error: 'Invalid update payload from Telegram' };
+    }
+
+    for (const update of data.result.slice().reverse()) {
+      const msg = update.message || update.edited_message || update.channel_post || update.callback_query?.message;
+      if (!msg) continue;
+
+      const chat = msg.chat;
+      const from = msg.from;
+
+      if (chat && chat.id) {
+        if (from?.is_bot) continue;
+
+        const foundChatId = String(chat.id);
+        const foundUserId = from?.id ? String(from.id) : undefined;
+
+        await persistDiscoveredTelegramChatId(foundChatId, foundUserId);
+
+        return { chatId: foundChatId, userId: foundUserId };
+      }
+    }
+
+    return {};
+  } catch (err: any) {
+    return { error: sanitizeTelegramError(err?.message || 'Network error during getUpdates') };
+  }
 }
 
 // Helper: Sanitize sensitive bot token out of error responses
@@ -52,9 +223,6 @@ app.get('/api/telegram/status', async (_req: Request, res: Response) => {
   try {
     const missingConfigs = getMissingTelegramConfigs();
     const token = process.env.TELEGRAM_BOT_TOKEN || '';
-    const chatId = process.env.TELEGRAM_CHAT_ID || '';
-    const userId = process.env.TELEGRAM_USER_ID || '';
-
     const enabled = process.env.TELEGRAM_ENABLED !== 'false';
 
     if (missingConfigs.length > 0) {
@@ -62,12 +230,32 @@ app.get('/api/telegram/status', async (_req: Request, res: Response) => {
         state: 'UNCONFIGURED',
         enabled,
         hasToken: Boolean(token),
-        hasChatId: Boolean(chatId),
-        hasUserId: Boolean(userId),
+        hasChatId: Boolean(getTelegramChatId()),
+        hasUserId: Boolean(getTelegramUserId()),
         missingConfigs,
         lastCheckTimestamp: Date.now(),
         lastError: `المتغيرات التالية مفقودة: ${missingConfigs.join(', ')}`,
       });
+    }
+
+    // Ensure persisted credentials are loaded from Supabase on first run
+    if (!persistedLoaded) {
+      const loaded = await loadPersistedTelegramChatId();
+      if (loaded.chatId) persistedChatId = loaded.chatId;
+      if (loaded.userId) persistedUserId = loaded.userId;
+      persistedLoaded = true;
+    }
+
+    let activeChatId = getTelegramChatId();
+    let activeUserId = getTelegramUserId();
+
+    // If no Chat ID exists yet, attempt automatic discovery using getUpdates
+    if (!activeChatId) {
+      const discoveryResult = await discoverTelegramChatId(token);
+      if (discoveryResult.chatId) {
+        activeChatId = discoveryResult.chatId;
+        if (discoveryResult.userId) activeUserId = discoveryResult.userId;
+      }
     }
 
     const start = Date.now();
@@ -76,15 +264,36 @@ app.get('/api/telegram/status', async (_req: Request, res: Response) => {
     const data = await response.json().catch(() => ({}));
 
     if (response.ok && data.ok) {
+      const botName = data.result?.first_name || 'Gold AI Bot';
+      const botUsername = data.result?.username ? `@${data.result.username}` : undefined;
+
+      if (!activeChatId) {
+        return res.json({
+          state: 'WAITING_FOR_START',
+          enabled,
+          hasToken: true,
+          hasChatId: false,
+          hasUserId: false,
+          missingConfigs: [],
+          botName,
+          botUsername,
+          lastCheckTimestamp: Date.now(),
+          latencyMs,
+          lastError: 'افتح البوت واضغط Start لإتمام الربط',
+        });
+      }
+
       return res.json({
         state: 'CONNECTED',
         enabled,
         hasToken: true,
         hasChatId: true,
-        hasUserId: true,
+        hasUserId: Boolean(activeUserId),
         missingConfigs: [],
-        botName: data.result?.first_name || 'Gold AI Bot',
-        botUsername: data.result?.username ? `@${data.result.username}` : undefined,
+        botName,
+        botUsername,
+        chatId: activeChatId,
+        userId: activeUserId,
         lastCheckTimestamp: Date.now(),
         latencyMs,
       });
@@ -95,8 +304,8 @@ app.get('/api/telegram/status', async (_req: Request, res: Response) => {
         state: 'DISCONNECTED',
         enabled,
         hasToken: true,
-        hasChatId: true,
-        hasUserId: true,
+        hasChatId: Boolean(activeChatId),
+        hasUserId: Boolean(activeUserId),
         missingConfigs: [],
         lastCheckTimestamp: Date.now(),
         latencyMs,
@@ -109,8 +318,8 @@ app.get('/api/telegram/status', async (_req: Request, res: Response) => {
       state: 'DISCONNECTED',
       enabled: process.env.TELEGRAM_ENABLED !== 'false',
       hasToken: Boolean(process.env.TELEGRAM_BOT_TOKEN),
-      hasChatId: Boolean(process.env.TELEGRAM_CHAT_ID),
-      hasUserId: Boolean(process.env.TELEGRAM_USER_ID),
+      hasChatId: Boolean(getTelegramChatId()),
+      hasUserId: Boolean(getTelegramUserId()),
       missingConfigs: getMissingTelegramConfigs(),
       lastCheckTimestamp: Date.now(),
       lastError: `خطأ اتصال: ${safeMsg}`,
@@ -139,7 +348,29 @@ app.post('/api/telegram/test', async (_req: Request, res: Response) => {
   }
 
   const token = process.env.TELEGRAM_BOT_TOKEN || '';
-  const chatId = process.env.TELEGRAM_CHAT_ID || '';
+
+  if (!persistedLoaded) {
+    const loaded = await loadPersistedTelegramChatId();
+    if (loaded.chatId) persistedChatId = loaded.chatId;
+    if (loaded.userId) persistedUserId = loaded.userId;
+    persistedLoaded = true;
+  }
+
+  let chatId = getTelegramChatId();
+  if (!chatId) {
+    const discovered = await discoverTelegramChatId(token);
+    if (discovered.chatId) {
+      chatId = discovered.chatId;
+    }
+  }
+
+  if (!chatId) {
+    return res.status(400).json({
+      success: false,
+      message: 'افتح البوت واضغط Start لإتمام الربط',
+      error: 'Telegram Chat ID not found. Send /start to the bot first.',
+    });
+  }
 
   isTestRunning = true;
   try {
@@ -200,10 +431,10 @@ app.post('/api/telegram/sendMessage', async (req: Request, res: Response) => {
 
   try {
     const { chatId, text, replyMarkup } = req.body;
-    const targetChatId = chatId || process.env.TELEGRAM_CHAT_ID;
+    const targetChatId = chatId || getTelegramChatId();
 
     if (!targetChatId) {
-      return res.status(400).json({ error: 'TELEGRAM_CHAT_ID not configured' });
+      return res.status(400).json({ error: 'TELEGRAM_CHAT_ID not configured and not discovered' });
     }
 
     const tgRes = await fetch(`https://api.telegram.org/bot${token}/sendMessage`, {
@@ -238,7 +469,7 @@ app.post('/api/telegram/editMessageText', async (req: Request, res: Response) =>
 
   try {
     const { chatId, messageId, text, replyMarkup } = req.body;
-    const targetChatId = chatId || process.env.TELEGRAM_CHAT_ID;
+    const targetChatId = chatId || getTelegramChatId();
 
     if (!targetChatId || !messageId) {
       return res.status(400).json({ error: 'chatId or messageId missing' });

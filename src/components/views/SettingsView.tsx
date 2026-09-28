@@ -704,6 +704,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ onSettingsSaved }) =
               >
                 {telegramStatus?.state === 'CONNECTED' && '🟢 متصل'}
                 {telegramStatus?.state === 'DISCONNECTED' && '🔴 غير متصل'}
+                {telegramStatus?.state === 'WAITING_FOR_START' && '🟡 بانتظار Start'}
                 {telegramStatus?.state === 'UNCONFIGURED' && '🟡 غير مُهيأ'}
                 {(!telegramStatus || isCheckingTelegram) && '⏳ جاري التحقق...'}
               </span>
@@ -721,6 +722,18 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ onSettingsSaved }) =
               )}
             </div>
           </div>
+
+          {/* WAITING FOR START BANNER */}
+          {telegramStatus?.state === 'WAITING_FOR_START' && (
+            <div className="p-2.5 rounded bg-amber-950/20 border border-amber-500/30 text-amber-300 text-xs flex items-center justify-between flex-wrap gap-2">
+              <div>
+                <strong className="block font-bold">افتح البوت واضغط Start لإتمام الربط:</strong>
+                <span className="text-[11px] text-amber-200/80">
+                  تم التحقق من توكن البوت بنجاح. يرجى فتح البوت ({telegramStatus.botUsername || 'Telegram Bot'}) والضغط على /start لاكتشاف معرف الدردشة تلقائياً وحفظه.
+                </span>
+              </div>
+            </div>
+          )}
 
           {/* MISSING CONFIGS WARNING */}
           {telegramStatus?.state === 'UNCONFIGURED' && telegramStatus.missingConfigs.length > 0 && (
