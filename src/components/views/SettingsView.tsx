@@ -19,10 +19,14 @@ import {
   RotateCcw,
   Check,
   Info,
+  Send,
+  RefreshCw,
+  Wifi,
 } from 'lucide-react';
 import { TradingEngine } from '../../services/trading_engine.ts';
 import { settingsService, SettingsSaveResult } from '../../services/settings_service.ts';
 import { openRouterClient } from '../../packages/ai/openrouter_client.ts';
+import { telegramBotService, TelegramStatusResult } from '../../packages/telegram/telegram_service.ts';
 
 interface SettingsViewProps {
   onSettingsSaved?: () => void;
@@ -78,7 +82,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ onSettingsSaved }) =
   const [aiModel, setAiModel] = useState(currentConfig.ai.model || openRouterStatus.model || 'غير محدد');
   const [aiTimeoutMs, setAiTimeoutMs] = useState(currentConfig.ai.timeoutMs || 30000);
 
-  // Section 6: Telegram Notifications
+  // Section 6: Telegram Notifications & Real Connection Status
   const [telegramEnabled, setTelegramEnabled] = useState(currentConfig.telegram.enabled || false);
   const [telegramRateLimit, setTelegramRateLimit] = useState(currentConfig.telegram.rateLimitPerMinute || 10);
   const [notifyTp1, setNotifyTp1] = useState(currentConfig.telegram.notifyOnTp1 ?? true);
@@ -88,6 +92,17 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ onSettingsSaved }) =
   const [notifyReversal, setNotifyReversal] = useState(currentConfig.telegram.notifyOnReversalWatch ?? true);
   const [notifyEarlyExit, setNotifyEarlyExit] = useState(true);
 
+  // Telegram Live Connectivity State
+  const [telegramStatus, setTelegramStatus] = useState<TelegramStatusResult | null>(null);
+  const [isCheckingTelegram, setIsCheckingTelegram] = useState(false);
+  const [isTestingTelegram, setIsTestingTelegram] = useState(false);
+  const [testFeedback, setTestFeedback] = useState<{
+    success: boolean;
+    message: string;
+    error?: string;
+    missingConfigs?: string[];
+  } | null>(null);
+
   // Section 7: Execution Governance & Safety
   const [emergencyKillSwitch, setEmergencyKillSwitch] = useState(
     currentConfig.execution.emergencyKillSwitch ?? true
@@ -96,6 +111,65 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ onSettingsSaved }) =
   // Status & Feedback
   const [isSaving, setIsSaving] = useState(false);
   const [feedback, setFeedback] = useState<SettingsSaveResult | null>(null);
+
+  const runTelegramCheck = async () => {
+    setIsCheckingTelegram(true);
+    try {
+      const res = await telegramBotService.checkConnectionStatus();
+      setTelegramStatus(res);
+    } finally {
+      setIsCheckingTelegram(false);
+    }
+  };
+
+  const handleSendTestMessage = async () => {
+    if (isTestingTelegram || isCheckingTelegram) return;
+    setIsTestingTelegram(true);
+    setTestFeedback(null);
+    try {
+      const res = await telegramBotService.sendTestMessage();
+      setTestFeedback(res);
+    } finally {
+      setIsTestingTelegram(false);
+      await runTelegramCheck();
+    }
+  };
+
+  const handleToggleTelegram = async (newValue: boolean) => {
+    setTelegramEnabled(newValue);
+    engine.updateConfig({
+      telegram: { ...engine.getConfig().telegram, enabled: newValue },
+    });
+    telegramBotService.setEnabled(newValue);
+
+    const payload = {
+      startingCapital: Number(capital),
+      riskPercentPerTrade: Number(riskPct),
+      maxDailyRiskPercent: Number(maxDailyRisk),
+      maxConcurrentTrades: Number(maxConcurrent),
+      maxAllowedSlDistance: Number(maxSlDist),
+      minRiskRewardRatio: Number(minRr),
+      maxDrawdownLimitPercent: Number(maxDrawdown),
+      minConfidenceThreshold: Number(minConfidenceThreshold),
+      minQualityScore: Number(minQualityScore),
+      emergencyKillSwitch,
+      telegramEnabled: newValue,
+      telegramRateLimitPerMinute: Number(telegramRateLimit),
+      candleWindow1M: Number(candleWindow1M),
+      aiTimeoutMs: Number(aiTimeoutMs),
+      monitorPollIntervalSeconds: Number(monitorInterval),
+      dedupPoiZoneToleranceUsd: Number(dedupTolerance),
+      strategies: strategies.map((s) => ({
+        id: s.id,
+        name: s.name,
+        enabled: s.enabled,
+        minConfidence: s.minConf,
+      })),
+    };
+
+    await settingsService.saveSettings(payload);
+    runTelegramCheck();
+  };
 
   // Auto-sync with Supabase and runtime engine state on mount
   React.useEffect(() => {
@@ -124,6 +198,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ onSettingsSaved }) =
     };
 
     syncFromPersistentStorage();
+    runTelegramCheck();
 
     const unsubscribe = engine.subscribe(() => {
       syncFromPersistentStorage();
@@ -582,22 +657,131 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ onSettingsSaved }) =
         </div>
       </div>
 
-      {/* SECTION 6: TELEGRAM NOTIFICATIONS (REQUIREMENT 18) */}
-      <div className="rounded-xl bg-[#0D121D] border border-slate-800 p-4 space-y-3">
-        <h3 className="text-xs font-bold text-white flex items-center gap-2 pb-2 border-b border-slate-800">
-          <Bell className="w-4 h-4 text-amber-400" />
-          <span>6. الإشعارات وقنوات التنبيه (Telegram Notifications)</span>
-        </h3>
+      {/* SECTION 6: TELEGRAM NOTIFICATIONS & REAL CONNECTION STATUS */}
+      <div className="rounded-xl bg-[#0D121D] border border-slate-800 p-4 space-y-4">
+        <div className="flex items-center justify-between pb-2 border-b border-slate-800 flex-wrap gap-2">
+          <h3 className="text-xs font-bold text-white flex items-center gap-2">
+            <Bell className="w-4 h-4 text-amber-400" />
+            <span>6. إعدادات وقناة التنبيه (Telegram Bot)</span>
+          </h3>
 
+          <div className="flex items-center gap-2">
+            <button
+              type="button"
+              onClick={runTelegramCheck}
+              disabled={isCheckingTelegram}
+              className="px-3 py-1 rounded-lg bg-slate-800 hover:bg-slate-700 disabled:opacity-50 text-slate-300 text-xs font-bold flex items-center gap-1.5 transition-colors cursor-pointer"
+            >
+              <RefreshCw className={`w-3.5 h-3.5 ${isCheckingTelegram ? 'animate-spin' : ''}`} />
+              <span>فحص الاتصال</span>
+            </button>
+
+            <button
+              type="button"
+              onClick={handleSendTestMessage}
+              disabled={isTestingTelegram || isCheckingTelegram}
+              className="px-3.5 py-1 rounded-lg bg-emerald-500 hover:bg-emerald-400 disabled:opacity-50 text-slate-950 font-bold text-xs flex items-center gap-1.5 shadow-sm transition-all cursor-pointer"
+            >
+              <Send className={`w-3.5 h-3.5 ${isTestingTelegram ? 'animate-spin' : ''}`} />
+              <span>إرسال رسالة اختبار</span>
+            </button>
+          </div>
+        </div>
+
+        {/* CONNECTION STATUS & DIAGNOSTICS CARD */}
+        <div className="p-3.5 rounded-lg bg-[#070A10] border border-slate-800 space-y-3">
+          <div className="flex items-center justify-between flex-wrap gap-2">
+            <div className="flex items-center gap-2">
+              <span className="text-xs text-slate-300 font-bold">حالة اتصال البوت:</span>
+              <span
+                className={`text-xs font-bold px-2.5 py-0.5 rounded flex items-center gap-1.5 ${
+                  telegramStatus?.state === 'CONNECTED'
+                    ? 'bg-emerald-500/10 text-emerald-400 border border-emerald-500/20'
+                    : telegramStatus?.state === 'DISCONNECTED'
+                    ? 'bg-rose-500/10 text-rose-400 border border-rose-500/20'
+                    : 'bg-amber-500/10 text-amber-400 border border-amber-500/20'
+                }`}
+              >
+                {telegramStatus?.state === 'CONNECTED' && '🟢 متصل'}
+                {telegramStatus?.state === 'DISCONNECTED' && '🔴 غير متصل'}
+                {telegramStatus?.state === 'UNCONFIGURED' && '🟡 غير مُهيأ'}
+                {(!telegramStatus || isCheckingTelegram) && '⏳ جاري التحقق...'}
+              </span>
+            </div>
+
+            <div className="flex items-center gap-4 text-[11px] font-mono text-slate-400">
+              {telegramStatus?.botUsername && (
+                <span>اسم البوت: <strong className="text-amber-400">{telegramStatus.botUsername}</strong></span>
+              )}
+              {telegramStatus?.latencyMs !== undefined && (
+                <span>زمن الاستجابة: <strong className="text-emerald-400">{telegramStatus.latencyMs}ms</strong></span>
+              )}
+              {telegramStatus?.lastCheckTimestamp && (
+                <span>آخر فحص: <strong className="text-slate-300">{new Date(telegramStatus.lastCheckTimestamp).toLocaleTimeString('ar-SA')}</strong></span>
+              )}
+            </div>
+          </div>
+
+          {/* MISSING CONFIGS WARNING */}
+          {telegramStatus?.state === 'UNCONFIGURED' && telegramStatus.missingConfigs.length > 0 && (
+            <div className="p-2.5 rounded bg-amber-950/20 border border-amber-500/30 text-amber-300 text-xs space-y-1">
+              <strong className="block font-bold">تنبيه: المتغيرات المطلوبة غير مُهيأة في البيئة:</strong>
+              <div className="flex flex-wrap gap-2 pt-1 font-mono text-[11px]">
+                {telegramStatus.missingConfigs.map((cfg) => (
+                  <span key={cfg} className="px-2 py-0.5 rounded bg-amber-500/20 text-amber-200 border border-amber-500/40">
+                    ✕ {cfg}
+                  </span>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {/* DISCONNECT ERROR MESSAGE */}
+          {telegramStatus?.state === 'DISCONNECTED' && telegramStatus.lastError && (
+            <div className="p-2.5 rounded bg-rose-950/20 border border-rose-500/30 text-rose-300 text-xs font-mono">
+              <strong>سبب الانقطاع:</strong> {telegramStatus.lastError}
+            </div>
+          )}
+        </div>
+
+        {/* TEST MESSAGE FEEDBACK BANNER */}
+        {testFeedback && (
+          <div
+            className={`p-3.5 rounded-lg border flex items-start gap-2.5 text-xs transition-all ${
+              testFeedback.success
+                ? 'bg-emerald-950/20 border-emerald-500/40 text-emerald-200'
+                : 'bg-rose-950/20 border-rose-500/40 text-rose-200'
+            }`}
+          >
+            {testFeedback.success ? (
+              <CheckCircle2 className="w-4 h-4 text-emerald-400 shrink-0 mt-0.5" />
+            ) : (
+              <XCircle className="w-4 h-4 text-rose-400 shrink-0 mt-0.5" />
+            )}
+            <div className="space-y-1">
+              <strong className="font-bold block">{testFeedback.message}</strong>
+              {testFeedback.error && (
+                <p className="font-mono text-[11px] text-rose-300 opacity-90">{testFeedback.error}</p>
+              )}
+              {testFeedback.missingConfigs && testFeedback.missingConfigs.length > 0 && (
+                <p className="font-mono text-[11px] text-amber-300 mt-1">
+                  المتغيرات المفقودة: {testFeedback.missingConfigs.join(', ')}
+                </p>
+              )}
+            </div>
+          </div>
+        )}
+
+        {/* CONTROLS GRID */}
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 text-xs">
           <div className="flex items-center justify-between p-3 rounded-lg bg-slate-900/60 border border-slate-800">
             <div>
               <span className="text-slate-200 font-bold block">إشعارات تليجرام (Telegram Bot):</span>
-              <span className="text-[11px] text-slate-400">إرسال التنبيهات المباشرة فور اكتمال الإشارة</span>
+              <span className="text-[11px] text-slate-400">حالة التفعيل والحفظ الدائم في Supabase</span>
             </div>
             <button
               type="button"
-              onClick={() => setTelegramEnabled(!telegramEnabled)}
+              onClick={() => handleToggleTelegram(!telegramEnabled)}
               className={`px-3 py-1.5 rounded-lg text-xs font-bold cursor-pointer transition-colors ${
                 telegramEnabled
                   ? 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/30'

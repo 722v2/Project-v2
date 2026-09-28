@@ -6,6 +6,7 @@
 import { supabasePersistence } from '../packages/persistence/supabase_service.ts';
 import { TradingEngine } from './trading_engine.ts';
 import { AppConfig } from '../types/config.ts';
+import { telegramBotService } from '../packages/telegram/telegram_service.ts';
 
 export interface SettingsSaveResult {
   success: boolean;
@@ -174,15 +175,18 @@ export class SettingsService {
             name: s.name,
             is_enabled: s.enabled,
             min_confidence: s.minConfidence,
-            // Attach general config bundle to the primary strategy row for full round-trip persistence
+            // Attach telegramEnabled & general config bundle to strategy custom_params
             custom_params: idx === 0
-              ? { ...(s.customParams || {}), _generalConfig: generalConfigData }
-              : (s.customParams || {}),
+              ? { ...(s.customParams || {}), telegramEnabled: payload.telegramEnabled, _generalConfig: generalConfigData }
+              : { ...(s.customParams || {}), telegramEnabled: payload.telegramEnabled },
           }))
         ),
       ]);
 
       await supabasePersistence.persistGeneralConfig(generalConfigData);
+
+      // Update runtime Telegram bot service
+      telegramBotService.setEnabled(payload.telegramEnabled);
 
       // 3. Update runtime engine configuration & Risk Engine
       const engine = TradingEngine.getInstance();
@@ -291,6 +295,17 @@ export class SettingsService {
         };
       }
 
+      let resolvedTelegramEnabled: boolean | undefined = undefined;
+
+      if (persisted.strategies && persisted.strategies.length > 0) {
+        for (const strat of persisted.strategies) {
+          if (strat.custom_params?.telegramEnabled !== undefined) {
+            resolvedTelegramEnabled = Boolean(strat.custom_params.telegramEnabled);
+            break;
+          }
+        }
+      }
+
       if (persisted.generalConfig) {
         const gen = persisted.generalConfig;
         if (gen.minConfidenceThreshold !== undefined) {
@@ -305,12 +320,17 @@ export class SettingsService {
             emergencyKillSwitch: Boolean(gen.emergencyKillSwitch),
           };
         }
-        if (gen.telegramEnabled !== undefined || gen.telegramRateLimitPerMinute !== undefined) {
+        if (gen.telegramEnabled !== undefined) {
+          resolvedTelegramEnabled = Boolean(gen.telegramEnabled);
+        }
+        if (resolvedTelegramEnabled !== undefined || gen.telegramRateLimitPerMinute !== undefined) {
+          const finalTelegramEnabled = resolvedTelegramEnabled !== undefined ? resolvedTelegramEnabled : current.telegram.enabled;
           partial.telegram = {
             ...current.telegram,
-            enabled: gen.telegramEnabled !== undefined ? Boolean(gen.telegramEnabled) : current.telegram.enabled,
+            enabled: finalTelegramEnabled,
             rateLimitPerMinute: gen.telegramRateLimitPerMinute !== undefined ? Number(gen.telegramRateLimitPerMinute) : current.telegram.rateLimitPerMinute,
           };
+          telegramBotService.setEnabled(finalTelegramEnabled);
         }
         if (gen.candleWindow1M !== undefined) {
           partial.candleWindows = {
@@ -336,6 +356,12 @@ export class SettingsService {
             poiZoneToleranceUsd: Number(gen.dedupPoiZoneToleranceUsd),
           };
         }
+      } else if (resolvedTelegramEnabled !== undefined) {
+        partial.telegram = {
+          ...current.telegram,
+          enabled: resolvedTelegramEnabled,
+        };
+        telegramBotService.setEnabled(resolvedTelegramEnabled);
       }
 
       if (Object.keys(partial).length > 0) {

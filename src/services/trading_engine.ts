@@ -251,6 +251,9 @@ export class TradingEngine {
       accountDefaults: { ...this.config.accountDefaults, ...(partial.accountDefaults || {}) },
     };
     this.riskEngine.updateSettings(this.config.accountDefaults, this.config.riskDefaults);
+    if (this.config.telegram && this.config.telegram.enabled !== undefined) {
+      telegramBotService.setEnabled(this.config.telegram.enabled);
+    }
     this.notify();
   }
 

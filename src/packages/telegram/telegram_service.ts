@@ -46,6 +46,22 @@ export interface CallbackQueryResult {
   updatedRecord?: TelegramTrackingRecord;
 }
 
+export type TelegramConnectionState = 'CONNECTED' | 'DISCONNECTED' | 'UNCONFIGURED' | 'CHECKING';
+
+export interface TelegramStatusResult {
+  state: TelegramConnectionState;
+  enabled: boolean;
+  hasToken: boolean;
+  hasChatId: boolean;
+  hasUserId: boolean;
+  missingConfigs: string[];
+  botName?: string;
+  botUsername?: string;
+  lastCheckTimestamp?: number;
+  lastError?: string;
+  latencyMs?: number;
+}
+
 export class TelegramBotService {
   private static instance: TelegramBotService | null = null;
   private trackingMap: Map<string, TelegramTrackingRecord> = new Map();
@@ -56,6 +72,8 @@ export class TelegramBotService {
   private authorizedUserId: string = '';
   private authorizedChatId: string = '';
   private rateLimitIntervalMs: number = 6000; // Default 10 edits/min = 6s throttle
+  private enabled: boolean = false;
+  private isTestRunning: boolean = false;
 
   private constructor() {
     this.reloadEnvCredentials();
@@ -69,11 +87,23 @@ export class TelegramBotService {
     return TelegramBotService.instance;
   }
 
+  public setEnabled(enabled: boolean): void {
+    this.enabled = enabled;
+  }
+
+  public isEnabled(): boolean {
+    return this.enabled;
+  }
+
   public reloadEnvCredentials(): void {
     if (typeof process !== 'undefined' && process.env) {
       this.botToken = process.env.TELEGRAM_BOT_TOKEN || '';
       this.authorizedUserId = process.env.TELEGRAM_USER_ID || '';
       this.authorizedChatId = process.env.TELEGRAM_CHAT_ID || '';
+
+      if (process.env.TELEGRAM_ENABLED !== undefined) {
+        this.enabled = process.env.TELEGRAM_ENABLED === 'true';
+      }
 
       const rateNum = Number(process.env.TELEGRAM_RATE_LIMIT_PER_MINUTE);
       if (!isNaN(rateNum) && rateNum > 0) {
@@ -86,6 +116,166 @@ export class TelegramBotService {
     this.botToken = token;
     if (userId !== undefined) this.authorizedUserId = userId;
     if (chatId !== undefined) this.authorizedChatId = chatId;
+  }
+
+  public getMissingConfigs(): string[] {
+    const missing: string[] = [];
+    if (!this.botToken) missing.push('TELEGRAM_BOT_TOKEN');
+    if (!this.authorizedChatId) missing.push('TELEGRAM_CHAT_ID');
+    if (!this.authorizedUserId) missing.push('TELEGRAM_USER_ID');
+    return missing;
+  }
+
+  public async checkConnectionStatus(): Promise<TelegramStatusResult> {
+    const missingConfigs = this.getMissingConfigs();
+    const hasToken = Boolean(this.botToken);
+    const hasChatId = Boolean(this.authorizedChatId);
+    const hasUserId = Boolean(this.authorizedUserId);
+
+    if (missingConfigs.length > 0) {
+      return {
+        state: 'UNCONFIGURED',
+        enabled: this.enabled,
+        hasToken,
+        hasChatId,
+        hasUserId,
+        missingConfigs,
+        lastCheckTimestamp: Date.now(),
+        lastError: `الإعدادات التالية مفقودة: ${missingConfigs.join(', ')}`,
+      };
+    }
+
+    const start = Date.now();
+    try {
+      const res = await fetch(`https://api.telegram.org/bot${this.botToken}/getMe`);
+      const latencyMs = Date.now() - start;
+      const data = await res.json().catch(() => ({}));
+
+      if (res.ok && data.ok) {
+        return {
+          state: 'CONNECTED',
+          enabled: this.enabled,
+          hasToken,
+          hasChatId,
+          hasUserId,
+          missingConfigs: [],
+          botName: data.result?.first_name || 'Gold AI Bot',
+          botUsername: data.result?.username ? `@${data.result.username}` : undefined,
+          lastCheckTimestamp: Date.now(),
+          latencyMs,
+        };
+      } else {
+        const safeDesc = (data.description || `HTTP ${res.status}`).replace(this.botToken, '***TOKEN***');
+        return {
+          state: 'DISCONNECTED',
+          enabled: this.enabled,
+          hasToken,
+          hasChatId,
+          hasUserId,
+          missingConfigs: [],
+          lastCheckTimestamp: Date.now(),
+          latencyMs,
+          lastError: `فشل الاتصال بـ Telegram Bot API (${safeDesc})`,
+        };
+      }
+    } catch (err: any) {
+      const latencyMs = Date.now() - start;
+      const safeMsg = (err.message || 'خطأ في الشبكة').replace(this.botToken, '***TOKEN***');
+      return {
+        state: 'DISCONNECTED',
+        enabled: this.enabled,
+        hasToken,
+        hasChatId,
+        hasUserId,
+        missingConfigs: [],
+        lastCheckTimestamp: Date.now(),
+        latencyMs,
+        lastError: `خطأ اتصال: ${safeMsg}`,
+      };
+    }
+  }
+
+  public async sendTestMessage(): Promise<{
+    success: boolean;
+    message: string;
+    error?: string;
+    missingConfigs?: string[];
+  }> {
+    // Prevent duplicate concurrent requests
+    if (this.isTestRunning) {
+      return {
+        success: false,
+        message: 'جاري تشغيل اختبار بالفعل، يرجى الانتظار...',
+        error: 'Duplicate test request',
+      };
+    }
+
+    if (!this.enabled) {
+      return {
+        success: false,
+        message: 'Telegram غير مفعّل',
+        error: 'Telegram غير مفعّل',
+      };
+    }
+
+    const missingConfigs = this.getMissingConfigs();
+    if (missingConfigs.length > 0) {
+      return {
+        success: false,
+        message: `تعذر الإرسال: المتغيرات التالية مفقودة (${missingConfigs.join(', ')})`,
+        error: 'Missing Telegram credentials',
+        missingConfigs,
+      };
+    }
+
+    this.isTestRunning = true;
+    try {
+      const nowFormatted = new Date().toLocaleString('ar-SA', {
+        dateStyle: 'short',
+        timeStyle: 'medium',
+      });
+
+      const text = [
+        '🧪 GOLD AI BOT V2',
+        'اختبار اتصال Telegram',
+        '',
+        'الحالة: الاتصال يعمل بنجاح 🟢',
+        `الوقت: ${nowFormatted}`,
+      ].join('\n');
+
+      const res = await fetch(`https://api.telegram.org/bot${this.botToken}/sendMessage`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          chat_id: this.authorizedChatId,
+          text,
+        }),
+      });
+
+      if (!res.ok) {
+        const errText = await res.text().catch(() => '');
+        const safeError = (errText || `HTTP ${res.status}`).replace(this.botToken, '***TOKEN***');
+        return {
+          success: false,
+          message: '🔴 فشل إرسال رسالة الاختبار',
+          error: `خطأ Telegram API: ${safeError}`,
+        };
+      }
+
+      return {
+        success: true,
+        message: '🟢 تم إرسال رسالة الاختبار بنجاح',
+      };
+    } catch (err: any) {
+      const safeError = (err.message || 'خطأ غير معروف').replace(this.botToken, '***TOKEN***');
+      return {
+        success: false,
+        message: '🔴 فشل إرسال رسالة الاختبار',
+        error: safeError,
+      };
+    } finally {
+      this.isTestRunning = false;
+    }
   }
 
   // --- STATE MACHINE VALIDATION ---
@@ -453,6 +643,10 @@ export class TelegramBotService {
   // --- TELEGRAM HTTP DISPATCHERS ---
 
   public async dispatchTelegramMessage(record: TelegramTrackingRecord): Promise<{ messageId?: string; error?: string }> {
+    if (!this.enabled) {
+      return { error: 'Telegram is disabled' };
+    }
+
     if (!this.botToken || !record.chatId) {
       return { error: 'Telegram bot token or chatId not configured' };
     }

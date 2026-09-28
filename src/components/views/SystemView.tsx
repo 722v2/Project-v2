@@ -18,6 +18,8 @@ import {
   Layers,
   Radio,
   Bot,
+  Bell,
+  Send,
 } from 'lucide-react';
 import { openRouterClient } from '../../packages/ai/openrouter_client.ts';
 import {
@@ -25,6 +27,10 @@ import {
   SupabaseHealth,
 } from '../../packages/persistence/supabase_service.ts';
 import { MarketDataHealth } from '../../packages/market-data/provider.ts';
+import {
+  telegramBotService,
+  TelegramStatusResult,
+} from '../../packages/telegram/telegram_service.ts';
 import {
   ENV_VARIABLE_REGISTRY,
   RECLASSIFIED_NON_SECRET_KEYS,
@@ -41,15 +47,36 @@ export const SystemView: React.FC<SystemViewProps> = ({
   dataFreshnessSeconds,
 }) => {
   const [supabaseHealth, setSupabaseHealth] = useState<SupabaseHealth | null>(null);
+  const [telegramStatus, setTelegramStatus] = useState<TelegramStatusResult | null>(null);
   const [isCheckingDb, setIsCheckingDb] = useState(false);
+  const [isTestingTelegram, setIsTestingTelegram] = useState(false);
+  const [telegramFeedback, setTelegramFeedback] = useState<string | null>(null);
 
   const checkDb = async () => {
     setIsCheckingDb(true);
     try {
-      const h = await supabasePersistence.checkHealth();
+      const [h, tg] = await Promise.all([
+        supabasePersistence.checkHealth(),
+        telegramBotService.checkConnectionStatus(),
+      ]);
       setSupabaseHealth(h);
+      setTelegramStatus(tg);
     } finally {
       setIsCheckingDb(false);
+    }
+  };
+
+  const handleTestTelegram = async () => {
+    if (isTestingTelegram) return;
+    setIsTestingTelegram(true);
+    setTelegramFeedback(null);
+    try {
+      const res = await telegramBotService.sendTestMessage();
+      setTelegramFeedback(res.message);
+    } finally {
+      setIsTestingTelegram(false);
+      const tg = await telegramBotService.checkConnectionStatus();
+      setTelegramStatus(tg);
     }
   };
 
@@ -188,6 +215,65 @@ export const SystemView: React.FC<SystemViewProps> = ({
               <span className="text-slate-400 font-sans">التنفيذ الآلي:</span>
               <span className="text-slate-400 font-sans">معطل (أمان مؤسسي)</span>
             </div>
+          </div>
+        </div>
+
+        {/* TELEGRAM BOT SUBSYSTEM */}
+        <div className="p-4 rounded-xl bg-[#0D121D] border border-slate-800 space-y-3">
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-2">
+              <Bell className="w-4 h-4 text-amber-400" />
+              <strong className="text-xs text-white">إشعارات التليجرام (Telegram Bot)</strong>
+            </div>
+            <span
+              className={`text-[10px] font-bold px-2 py-0.5 rounded ${
+                telegramStatus?.state === 'CONNECTED'
+                  ? 'bg-emerald-500/10 text-emerald-400 border border-emerald-500/20'
+                  : telegramStatus?.state === 'DISCONNECTED'
+                  ? 'bg-rose-500/10 text-rose-400 border border-rose-500/20'
+                  : 'bg-amber-500/10 text-amber-400 border border-amber-500/20'
+              }`}
+            >
+              {telegramStatus?.state === 'CONNECTED' && '🟢 متصل'}
+              {telegramStatus?.state === 'DISCONNECTED' && '🔴 غير متصل'}
+              {telegramStatus?.state === 'UNCONFIGURED' && '🟡 غير مُهيأ'}
+              {!telegramStatus && '⏳ جاري الفحص...'}
+            </span>
+          </div>
+
+          <div className="space-y-1.5 text-xs font-mono text-slate-300 pt-1">
+            <div className="flex justify-between">
+              <span className="text-slate-400 font-sans">حالة التفعيل:</span>
+              <span className={telegramStatus?.enabled ? 'text-emerald-400 font-bold' : 'text-slate-400 font-bold'}>
+                {telegramStatus?.enabled ? 'مفعل' : 'معطل'}
+              </span>
+            </div>
+            {telegramStatus?.botUsername && (
+              <div className="flex justify-between">
+                <span className="text-slate-400 font-sans">معرف البوت:</span>
+                <span className="text-amber-300 font-bold">{telegramStatus.botUsername}</span>
+              </div>
+            )}
+            {telegramStatus?.latencyMs !== undefined && (
+              <div className="flex justify-between">
+                <span className="text-slate-400 font-sans">زمن الاستجابة:</span>
+                <span className="text-emerald-400">{telegramStatus.latencyMs}ms</span>
+              </div>
+            )}
+            <div className="flex justify-between pt-1">
+              <button
+                type="button"
+                onClick={handleTestTelegram}
+                disabled={isTestingTelegram}
+                className="w-full py-1.5 rounded bg-emerald-500/20 hover:bg-emerald-500/30 text-emerald-300 border border-emerald-500/40 text-[11px] font-bold flex items-center justify-center gap-1.5 transition-colors cursor-pointer"
+              >
+                <Send className={`w-3 h-3 ${isTestingTelegram ? 'animate-spin' : ''}`} />
+                <span>إرسال رسالة اختبار</span>
+              </button>
+            </div>
+            {telegramFeedback && (
+              <p className="text-[10px] text-amber-300 font-sans pt-1 block">{telegramFeedback}</p>
+            )}
           </div>
         </div>
 
