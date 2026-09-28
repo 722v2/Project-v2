@@ -22,6 +22,7 @@ import {
 } from 'lucide-react';
 import { TradingEngine } from '../../services/trading_engine.ts';
 import { settingsService, SettingsSaveResult } from '../../services/settings_service.ts';
+import { openRouterClient } from '../../packages/ai/openrouter_client.ts';
 
 interface SettingsViewProps {
   onSettingsSaved?: () => void;
@@ -31,7 +32,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ onSettingsSaved }) =
   const engine = TradingEngine.getInstance();
   const currentConfig = engine.getConfig();
 
-  // Section 1: Market Data
+  // Section 1: Market Data & Scanner Thresholds
   const [provider] = useState('biquote');
   const [symbol] = useState('XAUUSD');
   const [candleWindow1M, setCandleWindow1M] = useState(currentConfig.candleWindows['1M'] || 200);
@@ -39,6 +40,8 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ onSettingsSaved }) =
   const [candleWindow15M] = useState(currentConfig.candleWindows['15M'] || 200);
   const [candleWindow1H] = useState(currentConfig.candleWindows['1H'] || 150);
   const [maxStaleness, setMaxStaleness] = useState(currentConfig.maxStalenessSeconds || 120);
+  const [minConfidenceThreshold, setMinConfidenceThreshold] = useState(currentConfig.minConfidenceThreshold || 70);
+  const [minQualityScore, setMinQualityScore] = useState(currentConfig.minQualityScore || 65);
 
   // Section 2: Risk Management
   const [capital, setCapital] = useState(currentConfig.accountDefaults.currentCapital);
@@ -67,9 +70,12 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ onSettingsSaved }) =
   const [reversalWatch, setReversalWatch] = useState(currentConfig.monitoring.reversalWatchEnabled ?? true);
   const [dedupTolerance, setDedupTolerance] = useState(currentConfig.dedup.poiZoneToleranceUsd || 1.0);
 
-  // Section 5: AI Reasoning
-  const [aiProvider] = useState('gemini');
-  const [aiModel] = useState('gemini-2.5-flash');
+  // Section 5: AI Reasoning (OpenRouter Provider & Model)
+  const openRouterStatus = openRouterClient.getStatus();
+  const [aiProvider, setAiProvider] = useState(
+    currentConfig.ai.provider === 'openrouter' ? 'OpenRouter' : currentConfig.ai.provider
+  );
+  const [aiModel, setAiModel] = useState(currentConfig.ai.model || openRouterStatus.model || 'غير محدد');
   const [aiTimeoutMs, setAiTimeoutMs] = useState(currentConfig.ai.timeoutMs || 30000);
 
   // Section 6: Telegram Notifications
@@ -91,6 +97,43 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ onSettingsSaved }) =
   const [isSaving, setIsSaving] = useState(false);
   const [feedback, setFeedback] = useState<SettingsSaveResult | null>(null);
 
+  // Auto-sync with Supabase and runtime engine state on mount
+  React.useEffect(() => {
+    const syncFromPersistentStorage = () => {
+      const cfg = engine.getConfig();
+      setCapital(cfg.accountDefaults.currentCapital);
+      setRiskPct(cfg.riskDefaults.riskPercentPerTrade);
+      setMaxDailyRisk(cfg.riskDefaults.maxDailyRiskPercent);
+      setMaxConcurrent(cfg.riskDefaults.maxConcurrentTrades);
+      setMaxSlDist(cfg.riskDefaults.maxAllowedSlDistance);
+      setMinRr(cfg.riskDefaults.minRiskRewardRatio);
+      setMaxDrawdown(cfg.riskDefaults.maxDrawdownLimitPercent);
+      setMinConfidenceThreshold(cfg.minConfidenceThreshold || 70);
+      setMinQualityScore(cfg.minQualityScore || 65);
+      setCandleWindow1M(cfg.candleWindows['1M'] || 200);
+      setMonitorInterval(cfg.monitoring.pollIntervalSeconds || 5);
+      setDedupTolerance(cfg.dedup.poiZoneToleranceUsd || 1.0);
+      setTelegramEnabled(cfg.telegram.enabled);
+      setTelegramRateLimit(cfg.telegram.rateLimitPerMinute);
+      setAiTimeoutMs(cfg.ai.timeoutMs);
+      const openRouterInfo = openRouterClient.getStatus();
+      const activeProviderName = cfg.ai.provider === 'openrouter' ? 'OpenRouter' : cfg.ai.provider;
+      setAiProvider(activeProviderName || 'OpenRouter');
+      setAiModel(cfg.ai.model || openRouterInfo.model || 'غير محدد');
+      setEmergencyKillSwitch(cfg.execution.emergencyKillSwitch);
+    };
+
+    syncFromPersistentStorage();
+
+    const unsubscribe = engine.subscribe(() => {
+      syncFromPersistentStorage();
+    });
+
+    return () => {
+      unsubscribe();
+    };
+  }, []);
+
   const toggleStrategy = (id: string) => {
     setStrategies(strategies.map((s) => (s.id === id ? { ...s, enabled: !s.enabled } : s)));
   };
@@ -111,6 +154,8 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ onSettingsSaved }) =
       maxAllowedSlDistance: Number(maxSlDist),
       minRiskRewardRatio: Number(minRr),
       maxDrawdownLimitPercent: Number(maxDrawdown),
+      minConfidenceThreshold: Number(minConfidenceThreshold),
+      minQualityScore: Number(minQualityScore),
       emergencyKillSwitch,
       telegramEnabled,
       telegramRateLimitPerMinute: Number(telegramRateLimit),
@@ -195,7 +240,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ onSettingsSaved }) =
           <span>1. بيانات السوق (Market Data Configuration)</span>
         </h3>
 
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3 text-xs">
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3 text-xs">
           <div>
             <label className="text-slate-400 block mb-1">مزود البيانات (Provider):</label>
             <input
@@ -236,6 +281,36 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ onSettingsSaved }) =
                 className="w-full bg-[#070A10] border border-slate-800 rounded-lg px-3 py-2 text-white font-mono text-xs"
               />
               <span className="text-slate-400 font-mono text-xs shrink-0">ثانية</span>
+            </div>
+          </div>
+
+          <div>
+            <label className="text-slate-400 block mb-1">الحد الأدنى لثقة الإشارة (Min Confidence %):</label>
+            <div className="flex items-center gap-1.5">
+              <input
+                type="number"
+                min="50"
+                max="99"
+                value={minConfidenceThreshold}
+                onChange={(e) => setMinConfidenceThreshold(Number(e.target.value))}
+                className="w-full bg-[#070A10] border border-slate-800 rounded-lg px-3 py-2 text-amber-400 font-bold font-mono text-xs"
+              />
+              <span className="text-slate-400 font-mono text-xs shrink-0">%</span>
+            </div>
+          </div>
+
+          <div>
+            <label className="text-slate-400 block mb-1">الحد الأدنى لجودة الإعداد (Min Quality Score):</label>
+            <div className="flex items-center gap-1.5">
+              <input
+                type="number"
+                min="50"
+                max="99"
+                value={minQualityScore}
+                onChange={(e) => setMinQualityScore(Number(e.target.value))}
+                className="w-full bg-[#070A10] border border-slate-800 rounded-lg px-3 py-2 text-amber-400 font-bold font-mono text-xs"
+              />
+              <span className="text-slate-400 font-mono text-xs shrink-0">/ 100</span>
             </div>
           </div>
         </div>
@@ -477,8 +552,8 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ onSettingsSaved }) =
             <input
               type="text"
               disabled
-              value="Gemini API"
-              className="w-full bg-[#070A10] border border-slate-800 rounded-lg px-3 py-2 text-slate-300 font-mono text-xs cursor-not-allowed"
+              value={aiProvider}
+              className="w-full bg-[#070A10] border border-slate-800 rounded-lg px-3 py-2 text-amber-400 font-bold font-mono text-xs cursor-not-allowed"
             />
           </div>
 
@@ -487,8 +562,8 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ onSettingsSaved }) =
             <input
               type="text"
               disabled
-              value="gemini-2.5-flash"
-              className="w-full bg-[#070A10] border border-slate-800 rounded-lg px-3 py-2 text-slate-300 font-mono text-xs cursor-not-allowed"
+              value={aiModel}
+              className="w-full bg-[#070A10] border border-slate-800 rounded-lg px-3 py-2 text-amber-400 font-bold font-mono text-xs cursor-not-allowed"
             />
           </div>
 

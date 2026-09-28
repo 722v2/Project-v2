@@ -305,6 +305,7 @@ export class SupabasePersistenceService {
     name: string;
     is_enabled: boolean;
     min_confidence: number;
+    custom_params?: Record<string, any>;
   }>): Promise<{ success: boolean; error?: string; persistedToDatabase: boolean }> {
     // 1. Update local storage replica
     if (typeof window !== 'undefined' && window.localStorage) {
@@ -325,6 +326,7 @@ export class SupabasePersistenceService {
           name: s.name,
           is_enabled: s.is_enabled,
           min_confidence: s.min_confidence,
+          custom_params: s.custom_params || {},
           updated_at: new Date().toISOString(),
         };
         const res = await this.upsertRow('strategy_settings', payload, 'strategy_id');
@@ -347,18 +349,30 @@ export class SupabasePersistenceService {
     };
   }
 
+  public async persistGeneralConfig(config: Record<string, any>): Promise<void> {
+    if (typeof window !== 'undefined' && window.localStorage) {
+      try {
+        localStorage.setItem('gold_bot_general_config', JSON.stringify(config));
+      } catch (e) {
+        console.warn('LocalStorage general config save error:', e);
+      }
+    }
+  }
+
   public async loadPersistedSettings(): Promise<{
     account?: AccountSettingsRecord;
     risk?: RiskSettingsRecord;
     strategies?: StrategySettingRecord[];
+    generalConfig?: Record<string, any>;
   }> {
     const result: {
       account?: AccountSettingsRecord;
       risk?: RiskSettingsRecord;
       strategies?: StrategySettingRecord[];
+      generalConfig?: Record<string, any>;
     } = {};
 
-    // 1. Try to load from Supabase if configured
+    // 1. Try to load from Supabase if configured (Persistent Source of Truth)
     if (this.isConfigured()) {
       try {
         const [accRes, riskRes, stratRes] = await Promise.allSettled([
@@ -377,6 +391,12 @@ export class SupabasePersistenceService {
           const data = await accRes.value.json();
           if (Array.isArray(data) && data[0]) {
             result.account = data[0];
+            // Cache to local storage replica
+            if (typeof window !== 'undefined' && window.localStorage) {
+              try {
+                localStorage.setItem('gold_bot_account_settings', JSON.stringify(data[0]));
+              } catch {}
+            }
           }
         }
 
@@ -384,6 +404,12 @@ export class SupabasePersistenceService {
           const data = await riskRes.value.json();
           if (Array.isArray(data) && data[0]) {
             result.risk = data[0];
+            // Cache to local storage replica
+            if (typeof window !== 'undefined' && window.localStorage) {
+              try {
+                localStorage.setItem('gold_bot_risk_settings', JSON.stringify(data[0]));
+              } catch {}
+            }
           }
         }
 
@@ -391,6 +417,19 @@ export class SupabasePersistenceService {
           const data = await stratRes.value.json();
           if (Array.isArray(data) && data.length > 0) {
             result.strategies = data;
+            // Extract any generalConfig embedded in custom_params
+            for (const item of data) {
+              if (item.custom_params && item.custom_params._generalConfig) {
+                result.generalConfig = item.custom_params._generalConfig;
+                break;
+              }
+            }
+            // Cache to local storage replica
+            if (typeof window !== 'undefined' && window.localStorage) {
+              try {
+                localStorage.setItem('gold_bot_strategy_settings', JSON.stringify(data));
+              } catch {}
+            }
           }
         }
       } catch (err) {
@@ -398,7 +437,7 @@ export class SupabasePersistenceService {
       }
     }
 
-    // 2. Fall back to local storage if not loaded from Supabase
+    // 2. Fall back to local storage cache if not loaded from Supabase
     if (typeof window !== 'undefined' && window.localStorage) {
       try {
         if (!result.account) {
@@ -412,6 +451,10 @@ export class SupabasePersistenceService {
         if (!result.strategies) {
           const localStrat = localStorage.getItem('gold_bot_strategy_settings');
           if (localStrat) result.strategies = JSON.parse(localStrat);
+        }
+        if (!result.generalConfig) {
+          const localGen = localStorage.getItem('gold_bot_general_config');
+          if (localGen) result.generalConfig = JSON.parse(localGen);
         }
       } catch (e) {
         console.warn('LocalStorage load error:', e);

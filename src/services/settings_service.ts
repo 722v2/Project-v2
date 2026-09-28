@@ -22,6 +22,8 @@ export interface SettingsPayload {
   maxAllowedSlDistance: number;
   minRiskRewardRatio: number;
   maxDrawdownLimitPercent: number;
+  minConfidenceThreshold?: number;
+  minQualityScore?: number;
   emergencyKillSwitch: boolean;
   telegramEnabled: boolean;
   telegramRateLimitPerMinute: number;
@@ -34,6 +36,7 @@ export interface SettingsPayload {
     name: string;
     enabled: boolean;
     minConfidence: number;
+    customParams?: Record<string, any>;
   }>;
 }
 
@@ -101,6 +104,20 @@ export class SettingsService {
       }
     }
 
+    if (payload.minConfidenceThreshold !== undefined) {
+      const val = Number(payload.minConfidenceThreshold);
+      if (isNaN(val) || val < 50 || val > 99) {
+        errors.minConfidenceThreshold = 'الحد الأدنى لنسبة الثقة يجب أن يكون بين 50% و 99%';
+      }
+    }
+
+    if (payload.minQualityScore !== undefined) {
+      const val = Number(payload.minQualityScore);
+      if (isNaN(val) || val < 50 || val > 99) {
+        errors.minQualityScore = 'الحد الأدنى لنقاط جودة الإعداد يجب أن يكون بين 50 و 99';
+      }
+    }
+
     return {
       isValid: Object.keys(errors).length === 0,
       errors,
@@ -124,7 +141,19 @@ export class SettingsService {
     }
 
     try {
-      // 2. Persist to Supabase Account & Risk Settings tables
+      const generalConfigData = {
+        minConfidenceThreshold: payload.minConfidenceThreshold ?? 70,
+        minQualityScore: payload.minQualityScore ?? 65,
+        emergencyKillSwitch: payload.emergencyKillSwitch,
+        telegramEnabled: payload.telegramEnabled,
+        telegramRateLimitPerMinute: payload.telegramRateLimitPerMinute,
+        candleWindow1M: payload.candleWindow1M,
+        aiTimeoutMs: payload.aiTimeoutMs,
+        monitorPollIntervalSeconds: payload.monitorPollIntervalSeconds,
+        dedupPoiZoneToleranceUsd: payload.dedupPoiZoneToleranceUsd,
+      };
+
+      // 2. Persist to Supabase Account, Risk, and Strategy tables
       const [accRes, riskRes, stratRes] = await Promise.all([
         supabasePersistence.persistAccountSettings({
           starting_capital: payload.startingCapital,
@@ -140,19 +169,27 @@ export class SettingsService {
           max_drawdown_limit_percent: payload.maxDrawdownLimitPercent,
         }),
         supabasePersistence.persistStrategySettings(
-          payload.strategies.map((s) => ({
+          payload.strategies.map((s, idx) => ({
             strategy_id: s.id,
             name: s.name,
             is_enabled: s.enabled,
             min_confidence: s.minConfidence,
+            // Attach general config bundle to the primary strategy row for full round-trip persistence
+            custom_params: idx === 0
+              ? { ...(s.customParams || {}), _generalConfig: generalConfigData }
+              : (s.customParams || {}),
           }))
         ),
       ]);
+
+      await supabasePersistence.persistGeneralConfig(generalConfigData);
 
       // 3. Update runtime engine configuration & Risk Engine
       const engine = TradingEngine.getInstance();
       const now = Date.now();
       engine.updateConfig({
+        minConfidenceThreshold: payload.minConfidenceThreshold ?? 70,
+        minQualityScore: payload.minQualityScore ?? 65,
         accountDefaults: {
           id: 'DEFAULT',
           startingCapital: payload.startingCapital,
@@ -223,6 +260,7 @@ export class SettingsService {
 
   /**
    * Loads initial settings from persistent storage and applies them to the engine.
+   * Supabase is the persistent source of truth. Existing settings are NEVER overwritten with defaults.
    */
   public async loadAndApplySettings(): Promise<void> {
     try {
@@ -235,8 +273,8 @@ export class SettingsService {
       if (persisted.account) {
         partial.accountDefaults = {
           ...current.accountDefaults,
-          startingCapital: persisted.account.starting_capital,
-          currentCapital: persisted.account.current_capital,
+          startingCapital: Number(persisted.account.starting_capital),
+          currentCapital: Number(persisted.account.current_capital),
           currency: persisted.account.currency || 'USD',
         };
       }
@@ -251,6 +289,53 @@ export class SettingsService {
           minRiskRewardRatio: Number(persisted.risk.min_risk_reward_ratio),
           maxDrawdownLimitPercent: Number(persisted.risk.max_drawdown_limit_percent),
         };
+      }
+
+      if (persisted.generalConfig) {
+        const gen = persisted.generalConfig;
+        if (gen.minConfidenceThreshold !== undefined) {
+          partial.minConfidenceThreshold = Number(gen.minConfidenceThreshold);
+        }
+        if (gen.minQualityScore !== undefined) {
+          partial.minQualityScore = Number(gen.minQualityScore);
+        }
+        if (gen.emergencyKillSwitch !== undefined) {
+          partial.execution = {
+            ...current.execution,
+            emergencyKillSwitch: Boolean(gen.emergencyKillSwitch),
+          };
+        }
+        if (gen.telegramEnabled !== undefined || gen.telegramRateLimitPerMinute !== undefined) {
+          partial.telegram = {
+            ...current.telegram,
+            enabled: gen.telegramEnabled !== undefined ? Boolean(gen.telegramEnabled) : current.telegram.enabled,
+            rateLimitPerMinute: gen.telegramRateLimitPerMinute !== undefined ? Number(gen.telegramRateLimitPerMinute) : current.telegram.rateLimitPerMinute,
+          };
+        }
+        if (gen.candleWindow1M !== undefined) {
+          partial.candleWindows = {
+            ...current.candleWindows,
+            '1M': Number(gen.candleWindow1M),
+          };
+        }
+        if (gen.aiTimeoutMs !== undefined) {
+          partial.ai = {
+            ...current.ai,
+            timeoutMs: Number(gen.aiTimeoutMs),
+          };
+        }
+        if (gen.monitorPollIntervalSeconds !== undefined) {
+          partial.monitoring = {
+            ...current.monitoring,
+            pollIntervalSeconds: Number(gen.monitorPollIntervalSeconds),
+          };
+        }
+        if (gen.dedupPoiZoneToleranceUsd !== undefined) {
+          partial.dedup = {
+            ...current.dedup,
+            poiZoneToleranceUsd: Number(gen.dedupPoiZoneToleranceUsd),
+          };
+        }
       }
 
       if (Object.keys(partial).length > 0) {

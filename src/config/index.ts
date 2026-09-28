@@ -96,8 +96,8 @@ export const DEFAULT_CONFIG: AppConfig = {
     notifyOnReversalWatch: true,
   },
   ai: {
-    provider: 'gemini',
-    model: 'gemini-2.5-flash',
+    provider: 'openrouter',
+    model: typeof process !== 'undefined' && process.env.AI_MODEL ? process.env.AI_MODEL : 'google/gemini-2.5-flash',
     timeoutMs: readEnvNum('AI_REASONING_TIMEOUT_MS', 30000),
   },
   execution: {

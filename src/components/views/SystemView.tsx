@@ -17,7 +17,9 @@ import {
   AlertTriangle,
   Layers,
   Radio,
+  Bot,
 } from 'lucide-react';
+import { openRouterClient } from '../../packages/ai/openrouter_client.ts';
 import {
   supabasePersistence,
   SupabaseHealth,
@@ -188,6 +190,43 @@ export const SystemView: React.FC<SystemViewProps> = ({
             </div>
           </div>
         </div>
+
+        {/* OPENROUTER AI ENGINE SUBSYSTEM */}
+        {(() => {
+          const aiStatus = openRouterClient.getStatus();
+          return (
+            <div className="p-4 rounded-xl bg-[#0D121D] border border-slate-800 space-y-3">
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-2">
+                  <Bot className="w-4 h-4 text-amber-400" />
+                  <strong className="text-xs text-white">محرك الذكاء الاصطناعي (OpenRouter AI)</strong>
+                </div>
+                <span className="text-[10px] font-bold px-2 py-0.5 rounded bg-emerald-500/10 text-emerald-400 border border-emerald-500/20">
+                  OpenRouter Active
+                </span>
+              </div>
+
+              <div className="space-y-1.5 text-xs font-mono text-slate-300 pt-1">
+                <div className="flex justify-between">
+                  <span className="text-slate-400 font-sans">المزود النشط:</span>
+                  <span className="text-amber-400 font-bold">OpenRouter API</span>
+                </div>
+                <div className="flex justify-between">
+                  <span className="text-slate-400 font-sans">النموذج المحدد:</span>
+                  <span className="text-amber-300 font-bold">{aiStatus.model}</span>
+                </div>
+                <div className="flex justify-between">
+                  <span className="text-slate-400 font-sans">مسار الخدمة:</span>
+                  <span className="text-[11px] text-slate-400">{aiStatus.baseUrl}</span>
+                </div>
+                <div className="flex justify-between">
+                  <span className="text-slate-400 font-sans">مهلة الاستجابة:</span>
+                  <span className="text-slate-300">{aiStatus.timeoutMs}ms</span>
+                </div>
+              </div>
+            </div>
+          );
+        })()}
       </div>
 
       {/* 2. VARIABLE CLASSIFICATION & SECRET ISOLATION AUDIT (USER REQUEST 1) */}
