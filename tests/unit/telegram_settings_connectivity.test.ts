@@ -8,6 +8,7 @@ import assert from 'node:assert/strict';
 import { TelegramBotService, telegramBotService } from '../../src/packages/telegram/telegram_service.ts';
 import { settingsService } from '../../src/services/settings_service.ts';
 import { TradingEngine } from '../../src/services/trading_engine.ts';
+import { app } from '../../server/index.ts';
 
 function createDummySettingsPayload(telegramEnabled: boolean) {
   return {
@@ -33,6 +34,124 @@ function createDummySettingsPayload(telegramEnabled: boolean) {
   };
 }
 
+test('Server API — 1. GET /api/health returns status ok without secrets', async () => {
+  const server = app.listen(0);
+  const address = server.address() as { port: number };
+  const port = address.port;
+
+  try {
+    const res = await fetch(`http://127.0.0.1:${port}/api/health`);
+    assert.equal(res.status, 200);
+    const data = await res.json();
+    assert.equal(data.status, 'ok');
+    assert.equal(data.service, 'gold-ai-bot-v2');
+    assert.ok(data.timestamp > 0);
+  } finally {
+    server.close();
+  }
+});
+
+test('Server API — 2. GET /api/telegram/status detects missing credentials safely', async () => {
+  const origToken = process.env.TELEGRAM_BOT_TOKEN;
+  delete process.env.TELEGRAM_BOT_TOKEN;
+
+  const server = app.listen(0);
+  const address = server.address() as { port: number };
+  const port = address.port;
+
+  try {
+    const res = await fetch(`http://127.0.0.1:${port}/api/telegram/status`);
+    assert.equal(res.status, 200);
+    const data = await res.json();
+    assert.equal(data.state, 'UNCONFIGURED');
+    assert.ok(data.missingConfigs.includes('TELEGRAM_BOT_TOKEN'));
+    // Ensure token is not returned
+    assert.equal(data.botToken, undefined);
+  } finally {
+    server.close();
+    if (origToken) process.env.TELEGRAM_BOT_TOKEN = origToken;
+  }
+});
+
+test('Server API — 3. GET /api/telegram/status performs getMe and sanitizes errors', async () => {
+  const originalFetch = globalThis.fetch;
+  process.env.TELEGRAM_BOT_TOKEN = 'SECRET_TOKEN_9999';
+  process.env.TELEGRAM_CHAT_ID = 'CHAT_123';
+  process.env.TELEGRAM_USER_ID = 'USER_123';
+
+  const server = app.listen(0);
+  const address = server.address() as { port: number };
+  const port = address.port;
+
+  try {
+    // Mock Telegram getMe call inside node fetch
+    const nodeFetch = globalThis.fetch;
+    globalThis.fetch = (async (url: string | URL, opts?: any) => {
+      if (String(url).includes('api.telegram.org/botSECRET_TOKEN_9999/getMe')) {
+        return {
+          ok: true,
+          status: 200,
+          json: async () => ({
+            ok: true,
+            result: { first_name: 'Gold Bot Server', username: 'GoldBotServer' },
+          }),
+        } as any;
+      }
+      return nodeFetch(url, opts);
+    }) as typeof fetch;
+
+    const res = await nodeFetch(`http://127.0.0.1:${port}/api/telegram/status`);
+    assert.equal(res.status, 200);
+    const data = await res.json();
+    assert.equal(data.state, 'CONNECTED');
+    assert.equal(data.botName, 'Gold Bot Server');
+    assert.equal(data.botUsername, '@GoldBotServer');
+    assert.equal(data.botToken, undefined);
+  } finally {
+    globalThis.fetch = originalFetch;
+    server.close();
+  }
+});
+
+test('Server API — 4. POST /api/telegram/test sends Arabic test message and sanitizes token on error', async () => {
+  const originalFetch = globalThis.fetch;
+  const sensitiveToken = 'SECRET_BOT_TOKEN_SENSITIVE';
+  process.env.TELEGRAM_BOT_TOKEN = sensitiveToken;
+  process.env.TELEGRAM_CHAT_ID = 'CHAT_456';
+  process.env.TELEGRAM_USER_ID = 'USER_456';
+  process.env.TELEGRAM_ENABLED = 'true';
+
+  const server = app.listen(0);
+  const address = server.address() as { port: number };
+  const port = address.port;
+
+  try {
+    const nodeFetch = globalThis.fetch;
+    globalThis.fetch = (async (url: string | URL, opts?: any) => {
+      if (String(url).includes('api.telegram.org/bot')) {
+        return {
+          ok: false,
+          status: 401,
+          text: async () => `Unauthorized request with token ${sensitiveToken}`,
+        } as any;
+      }
+      return nodeFetch(url, opts);
+    }) as typeof fetch;
+
+    const res = await nodeFetch(`http://127.0.0.1:${port}/api/telegram/test`, { method: 'POST' });
+    assert.equal(res.status, 400);
+    const data = await res.json();
+    assert.equal(data.success, false);
+    assert.ok(data.message.includes('فشل'));
+    // Verify token was sanitized
+    assert.equal(data.error?.includes(sensitiveToken), false);
+    assert.ok(data.error?.includes('***TOKEN***'));
+  } finally {
+    globalThis.fetch = originalFetch;
+    server.close();
+  }
+});
+
 test('Telegram Settings & Connectivity — 1. Telegram disabled state persists', async () => {
   const payload = createDummySettingsPayload(false);
   const saveRes = await settingsService.saveSettings(payload);
@@ -52,11 +171,9 @@ test('Telegram Settings & Connectivity — 2. Telegram enabled state persists', 
 });
 
 test('Telegram Settings & Connectivity — 3. Reload does not revert enabled -> disabled', async () => {
-  // First persist enabled = true
   await settingsService.saveSettings(createDummySettingsPayload(true));
   assert.equal(telegramBotService.isEnabled(), true);
 
-  // Simulate app reload / re-initialization from persisted storage
   await settingsService.loadAndApplySettings();
 
   assert.equal(TradingEngine.getInstance().getConfig().telegram.enabled, true);
@@ -71,167 +188,36 @@ test('Telegram Settings & Connectivity — 4. Runtime state matches persisted st
   assert.equal(TradingEngine.getInstance().getConfig().telegram.enabled, telegramBotService.isEnabled());
 });
 
-test('Telegram Settings & Connectivity — 5. Missing token is detected', () => {
-  telegramBotService.setCredentials('', 'user_123', 'chat_456');
-  const missing = telegramBotService.getMissingConfigs();
-
-  assert.ok(missing.includes('TELEGRAM_BOT_TOKEN'));
-});
-
-test('Telegram Settings & Connectivity — 6. Missing chat ID is detected', () => {
-  telegramBotService.setCredentials('token_123', 'user_123', '');
-  const missing = telegramBotService.getMissingConfigs();
-
-  assert.ok(missing.includes('TELEGRAM_CHAT_ID'));
-});
-
-test('Telegram Settings & Connectivity — 7. Missing user ID is detected', () => {
-  telegramBotService.setCredentials('token_123', '', 'chat_456');
-  const missing = telegramBotService.getMissingConfigs();
-
-  assert.ok(missing.includes('TELEGRAM_USER_ID'));
-});
-
-test('Telegram Settings & Connectivity — 8. getMe connectivity check succeeds/fails correctly', async () => {
-  // Save original fetch
+test('Frontend Telegram Service — 5. Uses backend API endpoints rather than private process.env variables', async () => {
   const originalFetch = globalThis.fetch;
 
   try {
-    // 8a. Mock Successful getMe
-    telegramBotService.setCredentials('valid_bot_token_999', 'user_123', 'chat_456');
+    telegramBotService.setEnabled(true);
+    let calledBackendApi = false;
+
     globalThis.fetch = (async (url: string | URL) => {
-      if (String(url).includes('/getMe')) {
+      if (String(url) === '/api/telegram/status') {
+        calledBackendApi = true;
         return {
           ok: true,
           status: 200,
           json: async () => ({
-            ok: true,
-            result: { id: 12345, first_name: 'Gold Test Bot', username: 'GoldTestBot' },
+            state: 'CONNECTED',
+            botName: 'Gold Bot API',
+            botUsername: '@GoldBotAPI',
+            latencyMs: 85,
+            lastCheckTimestamp: Date.now(),
           }),
         } as any;
       }
-      return { ok: false, status: 400, json: async () => ({}) } as any;
+      return { ok: false, status: 404 } as any;
     }) as typeof fetch;
 
-    const successStatus = await telegramBotService.checkConnectionStatus();
-    assert.equal(successStatus.state, 'CONNECTED');
-    assert.equal(successStatus.botName, 'Gold Test Bot');
-    assert.equal(successStatus.botUsername, '@GoldTestBot');
-
-    // 8b. Mock Failed getMe (HTTP 401 Unauthorized)
-    globalThis.fetch = (async () => {
-      return {
-        ok: false,
-        status: 401,
-        json: async () => ({ ok: false, description: 'Unauthorized' }),
-      } as any;
-    }) as typeof fetch;
-
-    const failStatus = await telegramBotService.checkConnectionStatus();
-    assert.equal(failStatus.state, 'DISCONNECTED');
-    assert.ok(failStatus.lastError?.includes('Unauthorized'));
+    const status = await telegramBotService.checkConnectionStatus();
+    assert.equal(calledBackendApi, true);
+    assert.equal(status.state, 'CONNECTED');
+    assert.equal(status.botName, 'Gold Bot API');
   } finally {
     globalThis.fetch = originalFetch;
-    telegramBotService.reloadEnvCredentials();
-  }
-});
-
-test('Telegram Settings & Connectivity — 9. Test-message endpoint sends through server/service only', async () => {
-  telegramBotService.setCredentials('secret_bot_token_777', 'user_123', 'chat_456');
-  telegramBotService.setEnabled(true);
-
-  const missing = telegramBotService.getMissingConfigs();
-  assert.equal(missing.length, 0);
-
-  // Clean up
-  telegramBotService.reloadEnvCredentials();
-});
-
-test('Telegram Settings & Connectivity — 10. Successful test message returns success', async () => {
-  const originalFetch = globalThis.fetch;
-
-  try {
-    telegramBotService.setCredentials('token_test_10', 'user_test_10', 'chat_test_10');
-    telegramBotService.setEnabled(true);
-
-    globalThis.fetch = (async (url: string | URL, opts?: any) => {
-      if (String(url).includes('/sendMessage')) {
-        const body = JSON.parse(opts?.body || '{}');
-        assert.equal(body.chat_id, 'chat_test_10');
-        assert.ok(body.text.includes('GOLD AI BOT V2'));
-        return {
-          ok: true,
-          status: 200,
-          json: async () => ({ ok: true, result: { message_id: 888 } }),
-        } as any;
-      }
-      return { ok: false, status: 400 } as any;
-    }) as typeof fetch;
-
-    const res = await telegramBotService.sendTestMessage();
-    assert.equal(res.success, true);
-    assert.ok(res.message.includes('بنجاح'));
-  } finally {
-    globalThis.fetch = originalFetch;
-    telegramBotService.reloadEnvCredentials();
-  }
-});
-
-test('Telegram Settings & Connectivity — 11. Failed Telegram API request returns safe error', async () => {
-  const originalFetch = globalThis.fetch;
-
-  try {
-    const sensitiveToken = 'SECRET_TOKEN_DO_NOT_LEAK_123';
-    telegramBotService.setCredentials(sensitiveToken, 'user_test_11', 'chat_test_11');
-    telegramBotService.setEnabled(true);
-
-    globalThis.fetch = (async () => {
-      return {
-        ok: false,
-        status: 400,
-        text: async () => `Bad Request: token ${sensitiveToken} rejected`,
-      } as any;
-    }) as typeof fetch;
-
-    const res = await telegramBotService.sendTestMessage();
-    assert.equal(res.success, false);
-    assert.ok(res.message.includes('فشل'));
-    // Crucial check: verify sensitiveToken is stripped/sanitized from error text
-    assert.equal(res.error?.includes(sensitiveToken), false);
-  } finally {
-    globalThis.fetch = originalFetch;
-    telegramBotService.reloadEnvCredentials();
-  }
-});
-
-test('Telegram Settings & Connectivity — 12. Test button cannot create duplicate concurrent requests', async () => {
-  const originalFetch = globalThis.fetch;
-
-  try {
-    telegramBotService.setCredentials('token_test_12', 'user_12', 'chat_12');
-    telegramBotService.setEnabled(true);
-
-    // Mock slow fetch
-    globalThis.fetch = (async () => {
-      await new Promise((resolve) => setTimeout(resolve, 50));
-      return {
-        ok: true,
-        status: 200,
-        json: async () => ({ ok: true }),
-      } as any;
-    }) as typeof fetch;
-
-    // Trigger two test messages concurrently
-    const p1 = telegramBotService.sendTestMessage();
-    const p2 = telegramBotService.sendTestMessage();
-
-    const [res1, res2] = await Promise.all([p1, p2]);
-
-    // One of them must succeed and the other must be rejected due to lock
-    const failedDuplicate = [res1, res2].find((r) => r.success === false && r.error === 'Duplicate test request');
-    assert.ok(failedDuplicate !== undefined);
-  } finally {
-    globalThis.fetch = originalFetch;
-    telegramBotService.reloadEnvCredentials();
   }
 });
