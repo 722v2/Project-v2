@@ -1,0 +1,6 @@
+{
+  "name": "Gold AI Bot V2 — Institutional XAU/USD Decision & Lifecycle Engine",
+  "description": "Institutional-grade XAU/USD quantitative analysis, setup identification, non-starvation evidence scoring, dynamic trade lifecycle monitoring, and risk management system.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
