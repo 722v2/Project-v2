@@ -532,6 +532,18 @@ app.get('/api/scanner/status', async (_req: Request, res: Response) => {
   }
 });
 
+// 9. POST /api/scanner/scan (Manual Scan)
+app.post('/api/scanner/scan', async (_req: Request, res: Response) => {
+  try {
+    const { TradingEngine } = await import('../src/services/trading_engine.ts');
+    await TradingEngine.getInstance().triggerManualScan();
+    const status = TradingEngine.getInstance().getScannerStatus();
+    return res.json({ success: true, status });
+  } catch (err: any) {
+    return res.status(500).json({ success: false, error: err?.message || 'Failed to trigger manual scan' });
+  }
+});
+
 // Proxy biquote market data endpoint
 app.use('/api/biquote', async (req: Request, res: Response) => {
   try {

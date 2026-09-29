@@ -273,6 +273,7 @@ CONFLICT-RESOLUTION POLICY:
   };
 
   public async analyzeSetupWithTools(snapshot: any): Promise<any> {
+    console.log('[AI] Setup eligible');
     const prompt = `Analyze this technical market snapshot: ${JSON.stringify(snapshot)}
     CRITICAL RULES:
     ${OpenRouterClient.CONFLICT_RESOLUTION_POLICY}
@@ -287,6 +288,7 @@ CONFLICT-RESOLUTION POLICY:
       tool_choice: { type: 'function', function: { name: 'submit_trade_analysis' } }
     };
 
+    console.log('[AI] Calling provider');
     const res = await fetch(`${this.baseUrl}/chat/completions`, {
       method: 'POST',
       headers: {
@@ -298,6 +300,7 @@ CONFLICT-RESOLUTION POLICY:
 
     if (!res.ok) throw new Error(`API error: ${res.status}`);
     const data = await res.json();
+    console.log('[AI] Provider response received');
     const toolCall = data.choices?.[0]?.message?.tool_calls?.[0];
     if (!toolCall) throw new Error('No tool call returned');
 

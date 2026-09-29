@@ -171,8 +171,9 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ onSettingsSaved }) =
   };
 
   // Auto-sync with Supabase and runtime engine state on mount
+  // Load settings from persistent storage and engine on mount ONLY
   React.useEffect(() => {
-    const syncFromPersistentStorage = () => {
+    const loadInitialSettings = () => {
       const cfg = engine.getConfig();
       setCapital(cfg.accountDefaults.currentCapital);
       setRiskPct(cfg.riskDefaults.riskPercentPerTrade);
@@ -192,16 +193,8 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ onSettingsSaved }) =
       setEmergencyKillSwitch(cfg.execution.emergencyKillSwitch);
     };
 
-    syncFromPersistentStorage();
+    loadInitialSettings();
     runTelegramCheck();
-
-    const unsubscribe = engine.subscribe(() => {
-      syncFromPersistentStorage();
-    });
-
-    return () => {
-      unsubscribe();
-    };
   }, []);
 
   const toggleStrategy = (id: string) => {

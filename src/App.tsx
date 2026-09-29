@@ -36,6 +36,28 @@ export default function App() {
       console.warn('Initial settings load error:', err);
     });
 
+    const fetchServerStatus = async () => {
+      try {
+        const res = await fetch('/api/scanner/status');
+        if (res.ok) {
+          const status = await res.json();
+          if (status) {
+            setEngineState(prev => ({
+              ...prev,
+              isScannerPaused: status.isPaused,
+              scannerStatus: status.status,
+              scanCount: status.scanCount,
+              lastScanTimestamp: status.lastScanTimestamp,
+              nextScanTimestamp: status.nextScanTimestamp,
+            }));
+          }
+        }
+      } catch (e) {}
+    };
+
+    fetchServerStatus();
+    const poll = setInterval(fetchServerStatus, 5000);
+
     // 2. Subscribe to live trading engine state updates
     const unsubscribe = engine.subscribe((newState) => {
       setEngineState({ ...newState });
@@ -43,6 +65,7 @@ export default function App() {
 
     return () => {
       unsubscribe();
+      clearInterval(poll);
     };
   }, []);
 
@@ -54,7 +77,59 @@ export default function App() {
   };
 
   const handleManualScan = async () => {
-    await engine.triggerManualScan();
+    try {
+      await fetch('/api/scanner/scan', { method: 'POST' });
+      const res = await fetch('/api/scanner/status');
+      if (res.ok) {
+        const status = await res.json();
+        setEngineState(prev => ({
+          ...prev,
+          isScannerPaused: status.isPaused,
+          scannerStatus: status.status,
+          scanCount: status.scanCount,
+          lastScanTimestamp: status.lastScanTimestamp,
+          nextScanTimestamp: status.nextScanTimestamp,
+        }));
+      }
+    } catch (e) {
+      await engine.triggerManualScan();
+    }
+  };
+
+  const handlePauseScanner = async () => {
+    try {
+      await fetch('/api/scanner/pause', { method: 'POST' });
+      const res = await fetch('/api/scanner/status');
+      if (res.ok) {
+        const status = await res.json();
+        setEngineState(prev => ({
+          ...prev,
+          isScannerPaused: status.isPaused,
+          scannerStatus: status.status,
+        }));
+      }
+    } catch (e) {
+      engine.pauseScanner();
+      setEngineState({ ...engine.getState() });
+    }
+  };
+
+  const handleResumeScanner = async () => {
+    try {
+      await fetch('/api/scanner/resume', { method: 'POST' });
+      const res = await fetch('/api/scanner/status');
+      if (res.ok) {
+        const status = await res.json();
+        setEngineState(prev => ({
+          ...prev,
+          isScannerPaused: status.isPaused,
+          scannerStatus: status.status,
+        }));
+      }
+    } catch (e) {
+      engine.resumeScanner();
+      setEngineState({ ...engine.getState() });
+    }
   };
 
   const currentCandles = engineState.displayCandles?.[timeframe] || engineState.candles[timeframe] || [];
@@ -156,8 +231,8 @@ export default function App() {
             currentPrice={engineState.currentPrice}
             dataFreshnessSeconds={engineState.dataFreshnessSeconds}
             onTriggerManualScan={handleManualScan}
-            onPauseScanner={() => engine.pauseScanner()}
-            onResumeScanner={() => engine.resumeScanner()}
+            onPauseScanner={handlePauseScanner}
+            onResumeScanner={handleResumeScanner}
           />
         )}
 
