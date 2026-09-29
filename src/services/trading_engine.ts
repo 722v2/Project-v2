@@ -6,7 +6,7 @@
 import { Candle, MarketRegime, MarketSnapshot, Timeframe } from '../types/market.ts';
 import { Signal, RejectionRecord } from '../types/signal.ts';
 import { Trade, TradePosition, TradeOutcome } from '../types/trade.ts';
-import { CandidateSetup } from '../types/setup.ts';
+import { CandidateSetup, SetupStrategy } from '../types/setup.ts';
 import { MarketDataProvider, MarketDataHealth, getMarketDataProvider } from '../packages/market-data/index.ts';
 import { DEFAULT_CONFIG, SYSTEM_VERSIONS } from '../config/index.ts';
 import { AppConfig } from '../types/config.ts';
@@ -16,6 +16,15 @@ import { generateSetupFingerprint, evaluateDeduplication } from '../packages/ded
 import { supabasePersistence } from '../packages/persistence/supabase_service.ts';
 import { telegramBotService } from '../packages/telegram/telegram_service.ts';
 import { openRouterClient } from '../packages/ai/openrouter_client.ts';
+import {
+  evaluateS1_LiquiditySweep,
+  evaluateS2_BOSContinuation,
+  evaluateS3_FVGRetracement,
+  evaluateS4_OrderBlockReaction,
+  evaluateS5_LiquidityObFvgConfluence,
+  evaluateS6_EqhEqlReversal,
+  StrategySignalResult,
+} from '../packages/strategies/strategy_evaluators.ts';
 
 export interface ScannerEventLog {
   id: string;
@@ -808,288 +817,298 @@ export class TradingEngine {
         name: 'Liquidity Sweep',
         nameArabic: 'سحب السيولة وانعكاس (Liquidity Sweep)',
         evaluated: true,
-        direction: 'BUY',
+        direction: 'NEUTRAL',
         score: 0,
         status: 'WAITING',
-        rejectionReason: 'في انتظار شمعة سحب واضحة لسيولة القاع السابق على 5M',
+        rejectionReason: 'في انتظار شمعة سحب واضحة لسيولة القاع/القمة على 5M',
       },
       {
         id: 'bos_pullback_continuation',
         strategyNumber: 'S2',
         name: 'BOS',
-        nameArabic: 'كسر هيكل السوق (BOS)',
+        nameArabic: 'كسر هيكل السوق واعادة الاختبار (BOS)',
         evaluated: true,
-        direction: 'BUY',
+        direction: 'NEUTRAL',
         score: 0,
         status: 'WAITING',
-        rejectionReason: 'لم يتشكل كسر حديث لأعلى قمة داخل النطاق',
+        rejectionReason: 'لم يتشكل كسر هيكلي واعادة اختبار للمنطقة المكسورة',
       },
       {
         id: 'fvg_retracement',
         strategyNumber: 'S3',
         name: 'FVG',
-        nameArabic: 'منطقة القيمة العادلة (FVG)',
+        nameArabic: 'الفجوة السعرية العادلة (FVG)',
         evaluated: true,
         direction: 'NEUTRAL',
         score: 0,
         status: 'WAITING',
-        rejectionReason: 'لا توجد فجوة سعرية غير ممتلئة في منطقة الخصم',
+        rejectionReason: 'لا توجد فجوة سعرية عادلة (FVG) جديدة غير ممتلئة',
       },
       {
         id: 'order_block_reaction',
         strategyNumber: 'S4',
         name: 'Order Block',
-        nameArabic: 'كتلة الأوامر (Order Block)',
+        nameArabic: 'تفاعل كتلة الأوامر المؤسسية (Order Block)',
         evaluated: true,
         direction: 'NEUTRAL',
         score: 0,
         status: 'WAITING',
-        rejectionReason: 'السعر يتداول بعيداً عن أقرب كتلة أوامر مؤسسية',
+        rejectionReason: 'السعر يتداول بعيداً عن كتل الأوامر المؤسسية القائمة',
       },
       {
         id: 'liquidity_ob_fvg_confluence',
         strategyNumber: 'S5',
-        name: 'Momentum',
-        nameArabic: 'توافق الزخم والسيولة',
-        evaluated: true,
-        direction: 'BUY',
-        score: 0,
-        status: 'WAITING',
-        rejectionReason: 'زخم RSI و MACD في المنطقة المحايدة (45-55)',
-      },
-      {
-        id: 'range_eqh_eql_reversal',
-        strategyNumber: 'S6',
-        name: 'Structure',
-        nameArabic: 'هيكل النطاق والقمم المتساوية EQH/EQL',
+        name: 'Confluence',
+        nameArabic: 'توافق السيولة والفجوة وكتلة الأوامر (Confluence)',
         evaluated: true,
         direction: 'NEUTRAL',
         score: 0,
         status: 'WAITING',
-        rejectionReason: 'السعر في منتصف النطاق السعري التوازني (Equilibrium)',
+        rejectionReason: 'عدم تحقق التوافق الكافي بين عوامل التداول المؤسسية',
+      },
+      {
+        id: 'range_eqh_eql_reversal',
+        strategyNumber: 'S6',
+        name: 'EQH/EQL Reversal',
+        nameArabic: 'هيكل القمم/القيعان المتساوية (EQH/EQL)',
+        evaluated: true,
+        direction: 'NEUTRAL',
+        score: 0,
+        status: 'WAITING',
+        rejectionReason: 'لم يتشكل سحب لسيولة القمم أو القيعان المتساوية القائمة',
       },
     ];
 
-    // Check if real candle patterns warrant a setup
-    if (candles5m.length >= 20) {
-      const lastClosed = candles5m[candles5m.length - 1];
-      const prevClosed = candles5m[candles5m.length - 2];
-      const isBullishCandle = lastClosed.close > lastClosed.open;
-      const lowerWick = lastClosed.open - lastClosed.low;
-      const body = Math.abs(lastClosed.close - lastClosed.open);
-      const isWickRejection = isBullishCandle && lowerWick > body * 1.4;
+    if (candles5m.length >= 15) {
+      // Evaluate all 6 strategies deterministically
+      const s1Res = evaluateS1_LiquiditySweep(candles5m, this.state.regime.regime);
+      const s2Res = evaluateS2_BOSContinuation(candles5m, this.state.regime.regime);
+      const s3Res = evaluateS3_FVGRetracement(candles5m, this.state.regime.regime);
+      const s4Res = evaluateS4_OrderBlockReaction(candles5m, this.state.regime.regime);
+      const s5Res = evaluateS5_LiquidityObFvgConfluence(candles5m, this.state.regime.regime, s1Res, s3Res, s4Res);
+      const s6Res = evaluateS6_EqhEqlReversal(candles5m, this.state.regime.regime);
 
-      if (this.state.regime.regime === 'TREND_UP' && isWickRejection) {
+      const strategyEvaluations = [s1Res, s2Res, s3Res, s4Res, s5Res, s6Res];
+
+      for (let i = 0; i < strategyEvaluations.length; i++) {
+        const st = strategyEvaluations[i];
+        stratResults[i].direction = st.direction;
+
+        if (!st.isSetupFound) {
+          stratResults[i].status = 'WAITING';
+          stratResults[i].rejectionReason = st.rejectionReason;
+          continue;
+        }
+
         setupsCount++;
-        const entryPrice = Number(lastClosed.close.toFixed(2));
-        const stopLoss = Number((lastClosed.low - 1.20).toFixed(2));
-        const slDistance = entryPrice - stopLoss;
-        const takeProfit1 = Number((entryPrice + slDistance * 1.5).toFixed(2));
-        const takeProfit2 = Number((entryPrice + slDistance * 2.7).toFixed(2));
 
-        // Evaluate Risk Engine
+        // 1. Risk Engine Evaluation
         const riskEval = this.riskEngine.evaluateTradeRisk({
-          direction: 'BUY',
-          entryPrice,
-          stopLoss,
-          takeProfit1,
+          direction: st.direction === 'SELL' ? 'SELL' : 'BUY',
+          entryPrice: st.entryPrice,
+          stopLoss: st.stopLoss,
+          takeProfit1: st.takeProfit1,
           currentOpenTradesCount: this.state.activeTrade ? 1 : 0,
         });
 
         if (!riskEval.isValid) {
           rejectedCount++;
-          stratResults[0].status = 'REJECTED';
+          stratResults[i].status = 'REJECTED';
           const reason = riskEval.violations.join(' · ');
-          stratResults[0].rejectionReason = `تم الرفض بواسطة محرك المخاطر: ${reason}`;
-          this.addScannerLog(`تم رفض فرصة S1 بسبب قيود المخاطر: ${reason}`, 'warn');
-        } else {
-          // Evaluate Evidence Scoring
-          const scoreResult = evaluateEvidenceScore({
-            direction: 'BUY',
-            entryPrice,
-            stopLoss,
-            takeProfit1,
-            takeProfit2,
-            maxAllowedSlDistance: this.config.riskDefaults.maxAllowedSlDistance,
-            minRiskRewardRatio: this.config.riskDefaults.minRiskRewardRatio,
-            marketStructureQuality: 0.88,
-            liquiditySweepQuality: 0.84,
-            poiCleanliness: 0.80,
-            mtfAlignmentScore: 0.78,
-            macdMomentumState: 'ALIGN',
-            rsiState: 'ACCEPTABLE',
-            emaAlignmentState: 'ALIGNED',
-            isDiscountOrPremium: true,
-            newsRiskState: 'CLEAR',
-          });
+          stratResults[i].rejectionReason = `تم الرفض بواسطة محرك المخاطر: ${reason}`;
+          this.addScannerLog(`تم رفض إعداد ${st.strategyNumber} بسبب قيود المخاطر: ${reason}`, 'warn');
+          continue;
+        }
 
-          stratResults[0].score = scoreResult.qualityScore;
+        // 2. Evidence Scoring Evaluation
+        const scoreResult = evaluateEvidenceScore({
+          direction: st.direction === 'SELL' ? 'SELL' : 'BUY',
+          entryPrice: st.entryPrice,
+          stopLoss: st.stopLoss,
+          takeProfit1: st.takeProfit1,
+          takeProfit2: st.takeProfit2,
+          maxAllowedSlDistance: this.config.riskDefaults.maxAllowedSlDistance,
+          minRiskRewardRatio: this.config.riskDefaults.minRiskRewardRatio,
+          marketStructureQuality: st.evidenceFactors.marketStructureQuality,
+          liquiditySweepQuality: st.evidenceFactors.liquiditySweepQuality,
+          poiCleanliness: st.evidenceFactors.poiCleanliness,
+          mtfAlignmentScore: st.evidenceFactors.mtfAlignmentScore,
+          macdMomentumState: st.evidenceFactors.macdMomentumState,
+          rsiState: st.evidenceFactors.rsiState,
+          emaAlignmentState: st.evidenceFactors.emaAlignmentState,
+          isDiscountOrPremium: st.evidenceFactors.isDiscountOrPremium,
+          newsRiskState: 'CLEAR',
+        });
 
-          if (!scoreResult.isActionable) {
-            rejectedCount++;
-            stratResults[0].status = 'REJECTED';
-            stratResults[0].rejectionReason = `نقاط الأدلة غير كافية: ${scoreResult.qualityScore}/100`;
-            this.addScannerLog(`تم رفض الإعداد: نقاط الأدلة ${scoreResult.qualityScore} أقل من الحد الأدنى`, 'warn');
-          } else {
-            // Deduplication Check
-            const fingerprint = generateSetupFingerprint({
-              strategy: 'liquidity_sweep_reversal',
-              direction: 'BUY',
-              timeframe: '5M',
-              anchorSwingId: `sw_low_${lastClosed.openTime}`,
-              poiZonePrice: lastClosed.low,
+        stratResults[i].score = scoreResult.qualityScore;
+
+        if (!scoreResult.isActionable) {
+          rejectedCount++;
+          stratResults[i].status = 'REJECTED';
+          stratResults[i].rejectionReason = `نقاط الأدلة غير كافية: ${scoreResult.qualityScore}/100`;
+          this.addScannerLog(`تم رفض إعداد ${st.strategyNumber}: نقاط الأدلة ${scoreResult.qualityScore} أقل من الحد الأدنى`, 'warn');
+          continue;
+        }
+
+        // 3. Deduplication Check
+        const fingerprint = generateSetupFingerprint({
+          strategy: st.strategyId as SetupStrategy,
+          direction: st.direction === 'SELL' ? 'SELL' : 'BUY',
+          timeframe: '5M',
+          anchorSwingId: st.anchorSwingId,
+          poiZonePrice: st.anchorZoneLow,
+        });
+
+        const candidateSetup: CandidateSetup = {
+          identity: {
+            setupId: fingerprint,
+            strategy: st.strategyId as SetupStrategy,
+            direction: st.direction === 'SELL' ? 'SELL' : 'BUY',
+            timeframe: '5M',
+            poiZoneLow: st.anchorZoneLow,
+            poiZoneHigh: st.anchorZoneHigh,
+            anchorSwingId: st.anchorSwingId,
+            anchorTimestamp: st.anchorTimestamp,
+          },
+          entryPrice: st.entryPrice,
+          stopLoss: st.stopLoss,
+          takeProfit1: st.takeProfit1,
+          takeProfit2: st.takeProfit2,
+          riskReward1: 1.5,
+          riskReward2: 2.7,
+          qualityScore: scoreResult.qualityScore,
+          confidence: 84,
+          lifecycleState: 'ACTIVE',
+          firstDetectedAt: Date.now(),
+          lastUpdatedAt: Date.now(),
+          structureNotes: st.reasons,
+          invalidationCriteria: [`إغلاق شمعة مع تجاوز مستوى ${st.stopLoss}`],
+        };
+
+        const existingSetups = this.state.activeSignal ? [candidateSetup] : [];
+        const dedup = evaluateDeduplication(candidateSetup, existingSetups, this.config.dedup.poiZoneToleranceUsd);
+
+        if (dedup.isDuplicate) {
+          dedupCount++;
+          stratResults[i].status = 'WATCHING';
+          stratResults[i].rejectionReason = `تم منع التكرار المكاني: نطاق POI مغطى بالفعل بـ Setup نشط`;
+          this.addScannerLog(`تم منع Setup مكرر لـ ${st.strategyNumber} في نفس نطاق POI`, 'info');
+          supabasePersistence.persistDuplicatePrevention({
+            attempted_setup_id: fingerprint,
+            existing_setup_id: existingSetups[0]?.identity.setupId || 'EXISTING',
+            strategy: st.strategyId,
+            direction: st.direction === 'SELL' ? 'SELL' : 'BUY',
+            new_candidate_price: st.entryPrice,
+            existing_poi_zone_low: st.anchorZoneLow,
+            existing_poi_zone_high: st.anchorZoneHigh,
+            dedup_reason: 'POI zone spatial overlap within tolerance threshold',
+          }).catch(() => {});
+          continue;
+        }
+
+        // 4. AI Advisory Verification (if configured)
+        let aiApproved = true;
+        let aiReasons = st.reasons;
+        let aiRiskNotes = [
+          `المخاطرة المخططة: $${(riskEval.sizing?.plannedRiskUsd ?? 1).toFixed(2)} (${this.config.riskDefaults.riskPercentPerTrade}%)`,
+          `حجم اللوت: ${riskEval.sizing?.positionSizeLots ?? 0.01} Lots`,
+        ];
+        let aiConfidence = 84;
+
+        if (!this.isPaused() && openRouterClient.isConfigured()) {
+          try {
+            this.addScannerLog(`إرسال إعداد ${st.strategyNumber} إلى تحليل Novita AI (DeepSeek)...`, 'info');
+            const aiRes = await openRouterClient.analyzeSetupWithTools({
+              symbol: 'XAU/USD',
+              strategy: st.strategyId,
+              direction: st.direction === 'SELL' ? 'SELL' : 'BUY',
+              entryPrice: st.entryPrice,
+              stopLoss: st.stopLoss,
+              takeProfit1: st.takeProfit1,
+              takeProfit2: st.takeProfit2,
+              regime: this.state.regime.regime,
+              qualityScore: scoreResult.qualityScore,
+              reasons: aiReasons,
             });
 
-            const candidateSetup: CandidateSetup = {
-              identity: {
-                setupId: fingerprint,
-                strategy: 'liquidity_sweep_reversal',
-                direction: 'BUY',
-                timeframe: '5M',
-                poiZoneLow: lastClosed.low,
-                poiZoneHigh: lastClosed.open,
-                anchorSwingId: `sw_low_${lastClosed.openTime}`,
-                anchorTimestamp: lastClosed.openTime,
-              },
-              entryPrice,
-              stopLoss,
-              takeProfit1,
-              takeProfit2,
-              riskReward1: 1.5,
-              riskReward2: 2.7,
-              qualityScore: scoreResult.qualityScore,
-              confidence: 84,
-              lifecycleState: 'ACTIVE',
-              firstDetectedAt: Date.now(),
-              lastUpdatedAt: Date.now(),
-              structureNotes: ['تم رصد رفض سعري وسحب سيولة على فريم 5M المباشر من Biquote'],
-              invalidationCriteria: [`إغلاق شمعة تحت مستوى ${stopLoss}`],
-            };
-
-            const existingSetups = this.state.activeSignal ? [candidateSetup] : [];
-            const dedup = evaluateDeduplication(candidateSetup, existingSetups, this.config.dedup.poiZoneToleranceUsd);
-
-            if (dedup.isDuplicate) {
-              dedupCount++;
-              stratResults[0].status = 'WATCHING';
-              stratResults[0].rejectionReason = `تم منع التكرار المكاني: نطاق POI مغطى بالفعل بـ Setup نشط`;
-              this.addScannerLog('تم منع Setup مكرر في نفس النطاق المكاني لـ POI', 'info');
-              supabasePersistence.persistDuplicatePrevention({
-                attempted_setup_id: fingerprint,
-                existing_setup_id: existingSetups[0]?.identity.setupId || 'EXISTING',
-                strategy: 'liquidity_sweep_reversal',
-                direction: 'BUY',
-                new_candidate_price: entryPrice,
-                existing_poi_zone_low: lastClosed.low,
-                existing_poi_zone_high: lastClosed.open,
-                dedup_reason: 'POI zone spatial overlap within tolerance threshold',
-              }).catch(() => {});
-            } else {
-              // Valid Non-Duplicate Signal - Verify via Novita AI client if not paused
-              let aiApproved = true;
-              let aiReasons: string[] = [
-                `سحب سيولة مباشر عند $${lastClosed.low.toFixed(2)} على تغذية Biquote الحية`,
-                'ذيل رفض شرائي صاعد مؤكد على شمعة 5M مغلقة',
-                'توافق متوسطات 15M EMA يؤكد الاتجاه العام الصاعد',
-              ];
-              let aiRiskNotes: string[] = [
-                `المخاطرة المخططة: $${(riskEval.sizing?.plannedRiskUsd ?? 1).toFixed(2)} (${this.config.riskDefaults.riskPercentPerTrade}%)`,
-                `حجم اللوت: ${riskEval.sizing?.positionSizeLots ?? 0.01} Lots`,
-              ];
-              let aiConfidence = 84;
-
-              if (!this.isPaused() && openRouterClient.isConfigured()) {
-                try {
-                  this.addScannerLog('إرسال الإعداد إلى تحليل Novita AI (DeepSeek) عبر submit_trade_analysis...', 'info');
-                  const aiRes = await openRouterClient.analyzeSetupWithTools({
-                    symbol: 'XAU/USD',
-                    strategy: 'liquidity_sweep_reversal',
-                    direction: 'BUY',
-                    entryPrice,
-                    stopLoss,
-                    takeProfit1,
-                    takeProfit2,
-                    regime: this.state.regime.regime,
-                    qualityScore: scoreResult.qualityScore,
-                    reasons: aiReasons,
-                  });
-
-                  if (aiRes && aiRes.decision) {
-                    const dec = String(aiRes.decision).toUpperCase();
-                    if (dec === 'NO_TRADE') {
-                      aiApproved = false;
-                      this.addScannerLog('رفض بواسطة الذكاء الاصطناعي (NO_TRADE) — لن يتم إنشاء صفقة تداولية', 'warn');
-                    } else {
-                      if (Array.isArray(aiRes.reasons) && aiRes.reasons.length > 0) {
-                        aiReasons = aiRes.reasons;
-                      }
-                      if (Array.isArray(aiRes.risk_notes) && aiRes.risk_notes.length > 0) {
-                        aiRiskNotes = aiRes.risk_notes;
-                      }
-                      if (typeof aiRes.confidence === 'number' && !isNaN(aiRes.confidence)) {
-                        aiConfidence = aiRes.confidence;
-                      }
-                      this.addScannerLog(`تم اعتماد الإعداد بنجاح بواسطة Novita AI (الثقة: ${aiConfidence}%)`, 'success');
-                    }
-                  }
-                } catch (aiErr: any) {
-                  this.addScannerLog(`ملاحظة AI: الاعتماد على التحقق الحتمي المحلي بسبب تعذر الاتصال (${aiErr?.message || 'offline'})`, 'info');
-                }
-              }
-
-              if (!aiApproved) {
-                rejectedCount++;
-                stratResults[0].status = 'REJECTED';
-                stratResults[0].rejectionReason = 'رفض بواسطة الذكاء الاصطناعي (NO_TRADE)';
+            if (aiRes && aiRes.decision) {
+              const dec = String(aiRes.decision).toUpperCase();
+              if (dec === 'NO_TRADE') {
+                aiApproved = false;
+                this.addScannerLog(`رفض بواسطة الذكاء الاصطناعي لـ ${st.strategyNumber} (NO_TRADE)`, 'warn');
               } else {
-                stratResults[0].status = 'ACTIVE';
-                stratResults[0].score = scoreResult.qualityScore;
-                signalsCount++;
-
-                if (!this.state.activeTrade || this.state.activeTrade.status === 'CLOSED') {
-                  const newSignal: Signal = {
-                    signalId: `sig_${Date.now()}`,
-                    setupId: fingerprint,
-                    symbol: 'XAU/USD',
-                    strategy: 'liquidity_sweep_reversal',
-                    direction: 'BUY',
-                    timeframe: '5M',
-                    entryPrice,
-                    stopLoss,
-                    takeProfit1,
-                    takeProfit2,
-                    riskReward1: 1.5,
-                    riskReward2: 2.7,
-                    confidence: aiConfidence,
-                    qualityScore: scoreResult.qualityScore,
-                    marketRegime: 'TREND_UP',
-                    evidenceBreakdown: scoreResult.breakdown,
-                    analysisReasons: aiReasons,
-                    riskNotes: aiRiskNotes,
-                    newsContext: { window: 'نافذة اقتصادية واضحة' },
-                    invalidatingConditions: [`إغلاق شمعة صريح أدنى من $${stopLoss.toFixed(2)}`],
-                    strategyVersion: SYSTEM_VERSIONS.strategyVersion,
-                    analysisVersion: SYSTEM_VERSIONS.analysisVersion,
-                    createdAt: Date.now(),
-                    status: 'AWAITING_USER_DECISION',
-                  };
-
-                  this.state.activeSignal = newSignal;
-                  this.state.recentSignals = [newSignal, ...this.state.recentSignals.slice(0, 19)];
-
-                  this.addScannerLog(`تم توليد إشارة شراء جديدة (S1 Liquidity Sweep) عند $${entryPrice.toFixed(2)} — بانتظار قرارك`, 'success');
-                  supabasePersistence.persistSignal(newSignal).catch(() => {});
-
-                  const trackingRecord = telegramBotService.registerSignal(newSignal);
-                  telegramBotService.dispatchTelegramMessage(trackingRecord).then((res) => {
-                    if (res.messageId) {
-                      newSignal.telegramMessageId = res.messageId;
-                      supabasePersistence.persistSignal(newSignal).catch(() => {});
-                    }
-                  }).catch(() => {});
+                if (Array.isArray(aiRes.reasons) && aiRes.reasons.length > 0) {
+                  aiReasons = aiRes.reasons;
                 }
+                if (Array.isArray(aiRes.risk_notes) && aiRes.risk_notes.length > 0) {
+                  aiRiskNotes = aiRes.risk_notes;
+                }
+                if (typeof aiRes.confidence === 'number' && !isNaN(aiRes.confidence)) {
+                  aiConfidence = aiRes.confidence;
+                }
+                this.addScannerLog(`تم اعتماد إعداد ${st.strategyNumber} بنجاح بواسطة Novita AI (${aiConfidence}%)`, 'success');
               }
             }
+          } catch (aiErr: any) {
+            this.addScannerLog(`ملاحظة AI: الاعتماد على التحقق الحتمي المحلي لـ ${st.strategyNumber} (${aiErr?.message || 'offline'})`, 'info');
+          }
+        }
+
+        if (!aiApproved) {
+          rejectedCount++;
+          stratResults[i].status = 'REJECTED';
+          stratResults[i].rejectionReason = 'رفض بواسطة الذكاء الاصطناعي (NO_TRADE)';
+          continue;
+        }
+
+        stratResults[i].status = 'ACTIVE';
+        stratResults[i].score = scoreResult.qualityScore;
+        signalsCount++;
+
+        if (!this.state.activeTrade || this.state.activeTrade.status === 'CLOSED') {
+          const newSignal: Signal = {
+            signalId: `sig_${Date.now()}`,
+            setupId: fingerprint,
+            symbol: 'XAU/USD',
+            strategy: st.strategyId as any,
+            direction: st.direction === 'SELL' ? 'SELL' : 'BUY',
+            timeframe: '5M',
+            entryPrice: st.entryPrice,
+            stopLoss: st.stopLoss,
+            takeProfit1: st.takeProfit1,
+            takeProfit2: st.takeProfit2,
+            riskReward1: 1.5,
+            riskReward2: 2.7,
+            qualityScore: scoreResult.qualityScore,
+            confidence: aiConfidence,
+            marketRegime: this.state.regime.regime,
+            evidenceBreakdown: scoreResult.breakdown,
+            analysisReasons: aiReasons,
+            riskNotes: aiRiskNotes,
+            newsContext: { window: 'Clear' },
+            invalidatingConditions: [`إغلاق شمعة مع تجاوز مستوى $${st.stopLoss.toFixed(2)}`],
+            strategyVersion: SYSTEM_VERSIONS.strategyVersion,
+            analysisVersion: SYSTEM_VERSIONS.analysisVersion,
+            createdAt: Date.now(),
+            status: 'AWAITING_USER_DECISION',
+          };
+
+          this.state.activeSignal = newSignal;
+          this.state.recentSignals = [newSignal, ...this.state.recentSignals.slice(0, 19)];
+          this.addScannerLog(`تم إنشاء إعداد صفقة جديد (${st.strategyNumber} - ${st.direction} @ $${st.entryPrice.toFixed(2)})`, 'success');
+
+          // Persist to Supabase (non-blocking)
+          supabasePersistence.persistSignal(newSignal).catch(() => {});
+
+          // Send Telegram Alert
+          const trackingRecord = telegramBotService.registerSignal(newSignal);
+          telegramBotService.dispatchTelegramMessage(trackingRecord).catch((err: any) => {
+            console.warn('Telegram signal alert error:', err?.message || 'Failed to dispatch');
+          });
+
+          // Auto-Execute Trade if Auto-Trading enabled
+          if (this.config.execution.autoTrading) {
+            this.executeTrade(newSignal);
           }
         }
       }
@@ -1251,6 +1270,10 @@ export class TradingEngine {
   }
 
   // --- TELEGRAM LIFECYCLE BRIDGE METHODS ---
+
+  public executeTrade(signal: Signal): boolean {
+    return this.confirmUserEntry(signal.signalId);
+  }
 
   public confirmUserEntry(signalId: string): boolean {
     const signal = this.state.activeSignal?.signalId === signalId
