@@ -47,8 +47,8 @@ export class OpenRouterClient {
   constructor(config?: OpenRouterConfig) {
     this.baseUrl = (
       config?.baseUrl ||
-      (typeof process !== 'undefined' ? process.env.OPENROUTER_BASE_URL : '') ||
-      'https://openrouter.ai/api/v1'
+      (typeof process !== 'undefined' ? (process.env.NOVITA_BASE_URL || process.env.OPENROUTER_BASE_URL) : '') ||
+      'https://api.novita.ai/openai/v1'
     ).replace(/\/+$/, '');
     this.apiKey =
       config?.apiKey ??
@@ -58,7 +58,7 @@ export class OpenRouterClient {
     this.model =
       config?.model ||
       (typeof process !== 'undefined' ? process.env.AI_MODEL : '') ||
-      'google/gemini-2.5-flash';
+      'deepseek/deepseek-v4-flash';
     this.timeoutMs =
       config?.timeoutMs ||
       (typeof process !== 'undefined' && process.env.AI_REASONING_TIMEOUT_MS
@@ -79,7 +79,7 @@ export class OpenRouterClient {
   } {
     return {
       configured: this.isConfigured(),
-      provider: 'openrouter',
+      provider: 'Novita AI',
       model: this.model,
       baseUrl: this.baseUrl,
       timeoutMs: this.timeoutMs,

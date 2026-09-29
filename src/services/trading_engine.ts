@@ -15,6 +15,7 @@ import { evaluateEvidenceScore } from '../packages/scoring/evidence_scorer.ts';
 import { generateSetupFingerprint, evaluateDeduplication } from '../packages/deduplication/fingerprint.ts';
 import { supabasePersistence } from '../packages/persistence/supabase_service.ts';
 import { telegramBotService } from '../packages/telegram/telegram_service.ts';
+import { openRouterClient } from '../packages/ai/openrouter_client.ts';
 
 export interface ScannerEventLog {
   id: string;
@@ -79,6 +80,9 @@ export interface TradingEngineState {
   recentSignals: Signal[];
   completedTrades: TradeOutcome[];
   isScannerRunning: boolean;
+  isScannerPaused: boolean;
+  scannerStatus: 'RUNNING' | 'PAUSED';
+  isScanningNow: boolean;
   isMonitorRunning: boolean;
   lastScanTimestamp: number;
   nextScanTimestamp: number;
@@ -112,7 +116,36 @@ export class TradingEngine {
 
   private constructor() {
     this.provider = getMarketDataProvider();
-    this.riskEngine = new RiskEngine(DEFAULT_CONFIG.accountDefaults, DEFAULT_CONFIG.riskDefaults);
+
+    let initialAccount = { ...DEFAULT_CONFIG.accountDefaults };
+    let initialRisk = { ...DEFAULT_CONFIG.riskDefaults };
+
+    if (typeof window !== 'undefined' && window.localStorage) {
+      try {
+        const savedAcc = localStorage.getItem('gold_bot_account_settings');
+        if (savedAcc) {
+          const parsed = JSON.parse(savedAcc);
+          initialAccount.startingCapital = Number(parsed.starting_capital || parsed.startingCapital || initialAccount.startingCapital);
+          initialAccount.currentCapital = Number(parsed.current_capital || parsed.currentCapital || initialAccount.startingCapital);
+        }
+        const savedRisk = localStorage.getItem('gold_bot_risk_settings');
+        if (savedRisk) {
+          const parsed = JSON.parse(savedRisk);
+          initialRisk.riskPercentPerTrade = Number(parsed.risk_percent_per_trade || parsed.riskPercentPerTrade || initialRisk.riskPercentPerTrade);
+          initialRisk.maxDailyRiskPercent = Number(parsed.max_daily_risk_percent || parsed.maxDailyRiskPercent || initialRisk.maxDailyRiskPercent);
+          initialRisk.maxConcurrentTrades = Number(parsed.max_concurrent_trades || parsed.maxConcurrentTrades || initialRisk.maxConcurrentTrades);
+          initialRisk.maxAllowedSlDistance = Number(parsed.max_allowed_sl_distance || parsed.maxAllowedSlDistance || initialRisk.maxAllowedSlDistance);
+          initialRisk.minRiskRewardRatio = Number(parsed.min_risk_reward_ratio || parsed.minRiskRewardRatio || initialRisk.minRiskRewardRatio);
+          initialRisk.maxDrawdownLimitPercent = Number(parsed.max_drawdown_limit_percent || parsed.maxDrawdownLimitPercent || initialRisk.maxDrawdownLimitPercent);
+        }
+      } catch (e) {
+        console.warn('Error reading persisted settings from localStorage in TradingEngine constructor:', e);
+      }
+    }
+
+    this.config.accountDefaults = initialAccount;
+    this.config.riskDefaults = initialRisk;
+    this.riskEngine = new RiskEngine(initialAccount, initialRisk);
 
     const initialNow = Date.now();
     this.state = {
@@ -157,6 +190,9 @@ export class TradingEngine {
       recentSignals: [],
       completedTrades: [],
       isScannerRunning: false,
+      isScannerPaused: false,
+      scannerStatus: 'RUNNING',
+      isScanningNow: false,
       isMonitorRunning: false,
       lastScanTimestamp: 0,
       nextScanTimestamp: initialNow + (DEFAULT_CONFIG.scannerIntervalSeconds || 60) * 1000,
@@ -317,6 +353,8 @@ export class TradingEngine {
     // 6. 60-Second Institutional Scanner Cycle (Requirements 13-16)
     if (!this.scannerIntervalId) {
       this.state.isScannerRunning = true;
+      this.state.isScannerPaused = false;
+      this.state.scannerStatus = 'RUNNING';
       const intervalSec = this.config.scannerIntervalSeconds || 60;
       this.state.nextScanTimestamp = Date.now() + intervalSec * 1000;
 
@@ -331,6 +369,97 @@ export class TradingEngine {
         this.runScannerCycle().catch(() => {});
       }, 3000);
     }
+  }
+
+  /**
+   * Authoritative Scanner Pause Control
+   * Pauses future scanner cycles while preserving live trade monitoring and open positions.
+   */
+  public pauseScanner(): { success: boolean; message: string; state: 'PAUSED' } {
+    this.state.isScannerPaused = true;
+    this.state.scannerStatus = 'PAUSED';
+    this.addScannerLog('تم إيقاف السكانر مؤقتاً. متابعة الصفقات المفتوحة والحالية مستمرة بنشاط.', 'info');
+    this.notify();
+    return {
+      success: true,
+      message: 'Scanner paused. Existing trade monitoring remains active.',
+      state: 'PAUSED',
+    };
+  }
+
+  /**
+   * Authoritative Scanner Resume Control
+   * Resumes normal scanner scheduling without creating duplicate timers or catch-up bursts.
+   */
+  public resumeScanner(): { success: boolean; message: string; state: 'RUNNING' } {
+    this.state.isScannerPaused = false;
+    this.state.scannerStatus = 'RUNNING';
+    this.state.isScannerRunning = true;
+
+    const intervalSec = this.config.scannerIntervalSeconds || 60;
+    this.state.nextScanTimestamp = Date.now() + intervalSec * 1000;
+
+    // Single Scheduler Protection: Ensure only ONE scanner timer loop exists
+    if (!this.scannerIntervalId) {
+      this.scannerIntervalId = setInterval(() => {
+        this.runScannerCycle().catch((err) => {
+          console.warn('Scanner cycle error:', err.message);
+        });
+      }, intervalSec * 1000);
+    }
+
+    this.addScannerLog('تم استئناف تشغيل السكانر بنجاح.', 'info');
+    this.notify();
+    return {
+      success: true,
+      message: 'Scanner resumed.',
+      state: 'RUNNING',
+    };
+  }
+
+  public isPaused(): boolean {
+    return this.state.isScannerPaused;
+  }
+
+  public getScannerStatus(): {
+    status: 'RUNNING' | 'PAUSED';
+    isPaused: boolean;
+    intervalSeconds: number;
+    isExecuting: boolean;
+    lastScanTimestamp: number;
+    nextScanTimestamp: number;
+    scanCount: number;
+    message: string;
+  } {
+    const status: 'RUNNING' | 'PAUSED' = this.state.isScannerPaused ? 'PAUSED' : 'RUNNING';
+    const intervalSeconds = this.config.scannerIntervalSeconds || 60;
+    const isExecuting = this.state.isScanningNow;
+    const lastScanTimeStr = this.state.lastScanTimestamp > 0
+      ? new Date(this.state.lastScanTimestamp).toISOString()
+      : 'Never';
+    const nextScanTimeStr = this.state.nextScanTimestamp > 0 && status === 'RUNNING'
+      ? new Date(this.state.nextScanTimestamp).toISOString()
+      : 'Paused (no scan scheduled)';
+
+    const message = [
+      `📊 حالة السكانر: ${status === 'RUNNING' ? '🟢 يعمل (RUNNING)' : '⏸️ متوقف مؤقتاً (PAUSED)'}`,
+      `⏱️ الفاصل الزمني: ${intervalSeconds} ثانية`,
+      `🔄 جاري التنفيذ حالياً: ${isExecuting ? 'نعم' : 'لا'}`,
+      `🕒 آخر فحص: ${lastScanTimeStr}`,
+      `⏳ الفحص القادم: ${nextScanTimeStr}`,
+      `🔢 إجمالي الفحوصات: #${this.state.scanCount}`,
+    ].join('\n');
+
+    return {
+      status,
+      isPaused: status === 'PAUSED',
+      intervalSeconds,
+      isExecuting,
+      lastScanTimestamp: this.state.lastScanTimestamp,
+      nextScanTimestamp: this.state.nextScanTimestamp,
+      scanCount: this.state.scanCount,
+      message,
+    };
   }
 
   private async loadHistoricalData(): Promise<void> {
@@ -359,6 +488,9 @@ export class TradingEngine {
     this.monitorIntervalId = null;
     this.scannerIntervalId = null;
     this.state.isScannerRunning = false;
+    this.state.isScannerPaused = false;
+    this.state.scannerStatus = 'RUNNING';
+    this.state.isScanningNow = false;
     this.state.isMonitorRunning = false;
     this.notify();
   }
@@ -593,6 +725,10 @@ export class TradingEngine {
    * Manual trigger for scanner cycle (Requirement 13)
    */
   public async triggerManualScan(): Promise<void> {
+    if (this.isPaused()) {
+      this.addScannerLog('تعذر تنفيذ الفحص اليدوي: السكانر في حالة إيقاف مؤقت (PAUSED)', 'warn');
+      return;
+    }
     this.addScannerLog('تم طلب فحص يدوي فوري من لوحة التحكم', 'info');
     await this.runScannerCycle();
   }
@@ -601,7 +737,19 @@ export class TradingEngine {
    * 60-Second Institutional Scanner Cycle (Requirements 13, 14, 15, 16)
    */
   public async runScannerCycle(): Promise<void> {
-    const startTime = Date.now();
+    if (this.isPaused()) {
+      this.addScannerLog('تم تخطي دورة الفحص: السكانر في حالة إيقاف مؤقت (PAUSED)', 'info');
+      return;
+    }
+
+    // Single active scan lock: prevent overlapping concurrent scans
+    if (this.state.isScanningNow) {
+      return;
+    }
+
+    this.state.isScanningNow = true;
+    try {
+      const startTime = Date.now();
     this.state.scanCount++;
     this.state.lastScanTimestamp = startTime;
     const intervalSec = this.config.scannerIntervalSeconds || 60;
@@ -826,59 +974,109 @@ export class TradingEngine {
                 dedup_reason: 'POI zone spatial overlap within tolerance threshold',
               }).catch(() => {});
             } else {
-              // Valid Non-Duplicate Signal
-              stratResults[0].status = 'ACTIVE';
-              stratResults[0].score = scoreResult.qualityScore;
-              signalsCount++;
+              // Valid Non-Duplicate Signal - Verify via Novita AI client if not paused
+              let aiApproved = true;
+              let aiReasons: string[] = [
+                `سحب سيولة مباشر عند $${lastClosed.low.toFixed(2)} على تغذية Biquote الحية`,
+                'ذيل رفض شرائي صاعد مؤكد على شمعة 5M مغلقة',
+                'توافق متوسطات 15M EMA يؤكد الاتجاه العام الصاعد',
+              ];
+              let aiRiskNotes: string[] = [
+                `المخاطرة المخططة: $${(riskEval.sizing?.plannedRiskUsd ?? 1).toFixed(2)} (${this.config.riskDefaults.riskPercentPerTrade}%)`,
+                `حجم اللوت: ${riskEval.sizing?.positionSizeLots ?? 0.01} Lots`,
+              ];
+              let aiConfidence = 84;
 
-              if (!this.state.activeTrade || this.state.activeTrade.status === 'CLOSED') {
-                const newSignal: Signal = {
-                  signalId: `sig_${Date.now()}`,
-                  setupId: fingerprint,
-                  symbol: 'XAU/USD',
-                  strategy: 'liquidity_sweep_reversal',
-                  direction: 'BUY',
-                  timeframe: '5M',
-                  entryPrice,
-                  stopLoss,
-                  takeProfit1,
-                  takeProfit2,
-                  riskReward1: 1.5,
-                  riskReward2: 2.7,
-                  confidence: 84,
-                  qualityScore: scoreResult.qualityScore,
-                  marketRegime: 'TREND_UP',
-                  evidenceBreakdown: scoreResult.breakdown,
-                  analysisReasons: [
-                    `سحب سيولة مباشر عند $${lastClosed.low.toFixed(2)} على تغذية Biquote الحية`,
-                    'ذيل رفض شرائي صاعد مؤكد على شمعة 5M مغلقة',
-                    'توافق متوسطات 15M EMA يؤكد الاتجاه العام الصاعد',
-                  ],
-                  riskNotes: [
-                    `المخاطرة المخططة: $${(riskEval.sizing?.plannedRiskUsd ?? 1).toFixed(2)} (${this.config.riskDefaults.riskPercentPerTrade}%)`,
-                    `حجم اللوت: ${riskEval.sizing?.positionSizeLots ?? 0.01} Lots`,
-                  ],
-                  newsContext: { window: 'نافذة اقتصادية واضحة' },
-                  invalidatingConditions: [`إغلاق شمعة صريح أدنى من $${stopLoss.toFixed(2)}`],
-                  strategyVersion: SYSTEM_VERSIONS.strategyVersion,
-                  analysisVersion: SYSTEM_VERSIONS.analysisVersion,
-                  createdAt: Date.now(),
-                  status: 'AWAITING_USER_DECISION',
-                };
+              if (!this.isPaused() && openRouterClient.isConfigured()) {
+                try {
+                  this.addScannerLog('إرسال الإعداد إلى تحليل Novita AI (DeepSeek) عبر submit_trade_analysis...', 'info');
+                  const aiRes = await openRouterClient.analyzeSetupWithTools({
+                    symbol: 'XAU/USD',
+                    strategy: 'liquidity_sweep_reversal',
+                    direction: 'BUY',
+                    entryPrice,
+                    stopLoss,
+                    takeProfit1,
+                    takeProfit2,
+                    regime: this.state.regime.regime,
+                    qualityScore: scoreResult.qualityScore,
+                    reasons: aiReasons,
+                  });
 
-                this.state.activeSignal = newSignal;
-                this.state.recentSignals = [newSignal, ...this.state.recentSignals.slice(0, 19)];
-
-                this.addScannerLog(`تم توليد إشارة شراء جديدة (S1 Liquidity Sweep) عند $${entryPrice.toFixed(2)} — بانتظار قرارك`, 'success');
-                supabasePersistence.persistSignal(newSignal).catch(() => {});
-
-                const trackingRecord = telegramBotService.registerSignal(newSignal);
-                telegramBotService.dispatchTelegramMessage(trackingRecord).then((res) => {
-                  if (res.messageId) {
-                    newSignal.telegramMessageId = res.messageId;
-                    supabasePersistence.persistSignal(newSignal).catch(() => {});
+                  if (aiRes && aiRes.decision) {
+                    const dec = String(aiRes.decision).toUpperCase();
+                    if (dec === 'NO_TRADE') {
+                      aiApproved = false;
+                      this.addScannerLog('رفض بواسطة الذكاء الاصطناعي (NO_TRADE) — لن يتم إنشاء صفقة تداولية', 'warn');
+                    } else {
+                      if (Array.isArray(aiRes.reasons) && aiRes.reasons.length > 0) {
+                        aiReasons = aiRes.reasons;
+                      }
+                      if (Array.isArray(aiRes.risk_notes) && aiRes.risk_notes.length > 0) {
+                        aiRiskNotes = aiRes.risk_notes;
+                      }
+                      if (typeof aiRes.confidence === 'number' && !isNaN(aiRes.confidence)) {
+                        aiConfidence = aiRes.confidence;
+                      }
+                      this.addScannerLog(`تم اعتماد الإعداد بنجاح بواسطة Novita AI (الثقة: ${aiConfidence}%)`, 'success');
+                    }
                   }
-                }).catch(() => {});
+                } catch (aiErr: any) {
+                  this.addScannerLog(`ملاحظة AI: الاعتماد على التحقق الحتمي المحلي بسبب تعذر الاتصال (${aiErr?.message || 'offline'})`, 'info');
+                }
+              }
+
+              if (!aiApproved) {
+                rejectedCount++;
+                stratResults[0].status = 'REJECTED';
+                stratResults[0].rejectionReason = 'رفض بواسطة الذكاء الاصطناعي (NO_TRADE)';
+              } else {
+                stratResults[0].status = 'ACTIVE';
+                stratResults[0].score = scoreResult.qualityScore;
+                signalsCount++;
+
+                if (!this.state.activeTrade || this.state.activeTrade.status === 'CLOSED') {
+                  const newSignal: Signal = {
+                    signalId: `sig_${Date.now()}`,
+                    setupId: fingerprint,
+                    symbol: 'XAU/USD',
+                    strategy: 'liquidity_sweep_reversal',
+                    direction: 'BUY',
+                    timeframe: '5M',
+                    entryPrice,
+                    stopLoss,
+                    takeProfit1,
+                    takeProfit2,
+                    riskReward1: 1.5,
+                    riskReward2: 2.7,
+                    confidence: aiConfidence,
+                    qualityScore: scoreResult.qualityScore,
+                    marketRegime: 'TREND_UP',
+                    evidenceBreakdown: scoreResult.breakdown,
+                    analysisReasons: aiReasons,
+                    riskNotes: aiRiskNotes,
+                    newsContext: { window: 'نافذة اقتصادية واضحة' },
+                    invalidatingConditions: [`إغلاق شمعة صريح أدنى من $${stopLoss.toFixed(2)}`],
+                    strategyVersion: SYSTEM_VERSIONS.strategyVersion,
+                    analysisVersion: SYSTEM_VERSIONS.analysisVersion,
+                    createdAt: Date.now(),
+                    status: 'AWAITING_USER_DECISION',
+                  };
+
+                  this.state.activeSignal = newSignal;
+                  this.state.recentSignals = [newSignal, ...this.state.recentSignals.slice(0, 19)];
+
+                  this.addScannerLog(`تم توليد إشارة شراء جديدة (S1 Liquidity Sweep) عند $${entryPrice.toFixed(2)} — بانتظار قرارك`, 'success');
+                  supabasePersistence.persistSignal(newSignal).catch(() => {});
+
+                  const trackingRecord = telegramBotService.registerSignal(newSignal);
+                  telegramBotService.dispatchTelegramMessage(trackingRecord).then((res) => {
+                    if (res.messageId) {
+                      newSignal.telegramMessageId = res.messageId;
+                      supabasePersistence.persistSignal(newSignal).catch(() => {});
+                    }
+                  }).catch(() => {});
+                }
               }
             }
           }
@@ -906,6 +1104,10 @@ export class TradingEngine {
     };
 
     this.notify();
+    } finally {
+      this.state.isScanningNow = false;
+      this.notify();
+    }
   }
 
   /**

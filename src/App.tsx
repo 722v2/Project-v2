@@ -154,12 +154,15 @@ export default function App() {
             lastScanDetails={engineState.lastScanDetails}
             scannerLogs={engineState.scannerLogs}
             isScannerRunning={engineState.isScannerRunning}
+            isScannerPaused={engineState.isScannerPaused}
             scanCount={engineState.scanCount}
             lastScanTimestamp={engineState.lastScanTimestamp}
             nextScanTimestamp={engineState.nextScanTimestamp}
             currentPrice={engineState.currentPrice}
             dataFreshnessSeconds={engineState.dataFreshnessSeconds}
             onTriggerManualScan={handleManualScan}
+            onPauseScanner={() => engine.pauseScanner()}
+            onResumeScanner={() => engine.resumeScanner()}
           />
         )}
 

@@ -499,6 +499,39 @@ app.post('/api/telegram/editMessageText', async (req: Request, res: Response) =>
   }
 });
 
+// 6. POST /api/scanner/pause
+app.post('/api/scanner/pause', async (_req: Request, res: Response) => {
+  try {
+    const { TradingEngine } = await import('../src/services/trading_engine.ts');
+    const result = TradingEngine.getInstance().pauseScanner();
+    return res.json(result);
+  } catch (err: any) {
+    return res.status(500).json({ success: false, error: err?.message || 'Failed to pause scanner' });
+  }
+});
+
+// 7. POST /api/scanner/resume
+app.post('/api/scanner/resume', async (_req: Request, res: Response) => {
+  try {
+    const { TradingEngine } = await import('../src/services/trading_engine.ts');
+    const result = TradingEngine.getInstance().resumeScanner();
+    return res.json(result);
+  } catch (err: any) {
+    return res.status(500).json({ success: false, error: err?.message || 'Failed to resume scanner' });
+  }
+});
+
+// 8. GET /api/scanner/status
+app.get('/api/scanner/status', async (_req: Request, res: Response) => {
+  try {
+    const { TradingEngine } = await import('../src/services/trading_engine.ts');
+    const status = TradingEngine.getInstance().getScannerStatus();
+    return res.json(status);
+  } catch (err: any) {
+    return res.status(500).json({ error: err?.message || 'Failed to retrieve scanner status' });
+  }
+});
+
 // Proxy biquote market data endpoint
 app.use('/api/biquote', async (req: Request, res: Response) => {
   try {

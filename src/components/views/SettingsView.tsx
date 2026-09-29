@@ -74,12 +74,11 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ onSettingsSaved }) =
   const [reversalWatch, setReversalWatch] = useState(currentConfig.monitoring.reversalWatchEnabled ?? true);
   const [dedupTolerance, setDedupTolerance] = useState(currentConfig.dedup.poiZoneToleranceUsd || 1.0);
 
-  // Section 5: AI Reasoning (OpenRouter Provider & Model)
+  // Section 5: AI Reasoning (Novita AI Provider & Model)
   const openRouterStatus = openRouterClient.getStatus();
-  const [aiProvider, setAiProvider] = useState(
-    currentConfig.ai.provider === 'openrouter' ? 'OpenRouter' : currentConfig.ai.provider
-  );
-  const [aiModel, setAiModel] = useState(currentConfig.ai.model || openRouterStatus.model || 'غير محدد');
+  const [aiProvider] = useState('Novita AI');
+  const [aiBaseUrl] = useState(openRouterStatus.baseUrl || 'https://api.novita.ai/openai/v1');
+  const [aiModel] = useState('deepseek/deepseek-v4-flash');
   const [aiTimeoutMs, setAiTimeoutMs] = useState(currentConfig.ai.timeoutMs || 30000);
 
   // Section 6: Telegram Notifications & Real Connection Status
@@ -190,10 +189,6 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ onSettingsSaved }) =
       setTelegramEnabled(cfg.telegram.enabled);
       setTelegramRateLimit(cfg.telegram.rateLimitPerMinute);
       setAiTimeoutMs(cfg.ai.timeoutMs);
-      const openRouterInfo = openRouterClient.getStatus();
-      const activeProviderName = cfg.ai.provider === 'openrouter' ? 'OpenRouter' : cfg.ai.provider;
-      setAiProvider(activeProviderName || 'OpenRouter');
-      setAiModel(cfg.ai.model || openRouterInfo.model || 'غير محدد');
       setEmergencyKillSwitch(cfg.execution.emergencyKillSwitch);
     };
 
@@ -621,7 +616,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ onSettingsSaved }) =
           <span>5. الذكاء الاصطناعي (AI Reasoning Parameters)</span>
         </h3>
 
-        <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 text-xs">
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3 text-xs">
           <div>
             <label className="text-slate-400 block mb-1">المزود (Provider):</label>
             <input
@@ -629,6 +624,16 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ onSettingsSaved }) =
               disabled
               value={aiProvider}
               className="w-full bg-[#070A10] border border-slate-800 rounded-lg px-3 py-2 text-amber-400 font-bold font-mono text-xs cursor-not-allowed"
+            />
+          </div>
+
+          <div>
+            <label className="text-slate-400 block mb-1">رابط الأساس (Base URL):</label>
+            <input
+              type="text"
+              disabled
+              value={aiBaseUrl}
+              className="w-full bg-[#070A10] border border-slate-800 rounded-lg px-3 py-2 text-slate-300 font-mono text-xs cursor-not-allowed"
             />
           </div>
 

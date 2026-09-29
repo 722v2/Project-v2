@@ -382,6 +382,59 @@ export class TelegramBotService {
 
   // --- BUTTONS BUILDER ---
 
+  public getScannerControlButtons(): Array<Array<{ text: string; callback_data: string }>> {
+    return [
+      [
+        { text: '⏸️ Pause Scanner', callback_data: 'scanner_pause' },
+        { text: '▶️ Resume Scanner', callback_data: 'scanner_resume' },
+      ],
+      [
+        { text: '📊 Scanner Status', callback_data: 'scanner_status' },
+      ],
+    ];
+  }
+
+  public async sendScannerControlMessage(chatId?: string): Promise<{ success: boolean; messageId?: string; error?: string }> {
+    const targetChatId = chatId || this.authorizedChatId;
+    if (!targetChatId) {
+      return { success: false, error: 'No authorized Chat ID configured' };
+    }
+
+    const replyMarkup = { inline_keyboard: this.getScannerControlButtons() };
+    const text = '🎛️ **لوحة التحكم بالسكانر المؤسسي (Scanner Control)**\n\nيمكنك التحكم بدورة الفحص الدوري وحالة السكانر أدناه:';
+
+    try {
+      const res = await fetch('/api/telegram/sendMessage', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          chatId: targetChatId,
+          text,
+          replyMarkup,
+        }),
+      });
+
+      if (!res.ok && this.botToken) {
+        const directRes = await fetch(`https://api.telegram.org/bot${this.botToken}/sendMessage`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            chat_id: targetChatId,
+            text,
+            reply_markup: replyMarkup,
+          }),
+        });
+        const data = await directRes.json().catch(() => ({}));
+        return { success: directRes.ok, messageId: String(data.result?.message_id || '') };
+      }
+
+      const data = await res.json().catch(() => ({}));
+      return { success: res.ok, messageId: String(data.result?.message_id || '') };
+    } catch (err: any) {
+      return { success: false, error: err?.message || 'Failed to dispatch scanner control message' };
+    }
+  }
+
   public formatInlineButtons(record: TelegramTrackingRecord): Array<Array<{ text: string; callback_data: string }>> {
     switch (record.lifecycleState) {
       case 'AWAITING_USER_DECISION':
@@ -431,7 +484,62 @@ export class TelegramBotService {
       };
     }
 
-    // 2. Parse action and signalId
+    // 2. Global Bot / Scanner Control Actions (Requirement: Pause, Resume, Status)
+    if (callbackData === 'scanner_pause' || callbackData === 'pause_scanner') {
+      try {
+        const { TradingEngine } = await import('../../services/trading_engine.ts');
+        const res = TradingEngine.getInstance().pauseScanner();
+        return {
+          success: true,
+          message: res.message || 'Scanner paused. Existing trade monitoring remains active.',
+          alert: false,
+        };
+      } catch {
+        return {
+          success: false,
+          message: 'فشل إيقاف السكانر',
+          alert: true,
+        };
+      }
+    }
+
+    if (callbackData === 'scanner_resume' || callbackData === 'resume_scanner') {
+      try {
+        const { TradingEngine } = await import('../../services/trading_engine.ts');
+        const res = TradingEngine.getInstance().resumeScanner();
+        return {
+          success: true,
+          message: res.message || 'Scanner resumed.',
+          alert: false,
+        };
+      } catch {
+        return {
+          success: false,
+          message: 'فشل استئناف السكانر',
+          alert: true,
+        };
+      }
+    }
+
+    if (callbackData === 'scanner_status' || callbackData === 'status_scanner') {
+      try {
+        const { TradingEngine } = await import('../../services/trading_engine.ts');
+        const status = TradingEngine.getInstance().getScannerStatus();
+        return {
+          success: true,
+          message: status.message,
+          alert: false,
+        };
+      } catch {
+        return {
+          success: false,
+          message: 'فشل جلب حالة السكانر',
+          alert: true,
+        };
+      }
+    }
+
+    // 3. Parse action and signalId
     const parts = callbackData.split('_');
     const action = parts[0]; // 'entry', 'cancel', 'win', 'loss'
     const signalId = parts.slice(1).join('_');

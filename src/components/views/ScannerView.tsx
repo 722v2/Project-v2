@@ -7,6 +7,7 @@ import React, { useState, useEffect } from 'react';
 import {
   Radar,
   Play,
+  Pause,
   RotateCw,
   Clock,
   CheckCircle2,
@@ -29,24 +30,30 @@ interface ScannerViewProps {
   lastScanDetails: LastScanDetails;
   scannerLogs: ScannerEventLog[];
   isScannerRunning: boolean;
+  isScannerPaused?: boolean;
   scanCount: number;
   lastScanTimestamp: number;
   nextScanTimestamp: number;
   currentPrice: number;
   dataFreshnessSeconds: number;
   onTriggerManualScan: () => Promise<void>;
+  onPauseScanner?: () => void;
+  onResumeScanner?: () => void;
 }
 
 export const ScannerView: React.FC<ScannerViewProps> = ({
   lastScanDetails,
   scannerLogs,
   isScannerRunning,
+  isScannerPaused = false,
   scanCount,
   lastScanTimestamp,
   nextScanTimestamp,
   currentPrice,
   dataFreshnessSeconds,
   onTriggerManualScan,
+  onPauseScanner,
+  onResumeScanner,
 }) => {
   const [isScanningNow, setIsScanningNow] = useState(false);
   const [countdown, setCountdown] = useState(60);
@@ -63,6 +70,7 @@ export const ScannerView: React.FC<ScannerViewProps> = ({
   }, [nextScanTimestamp]);
 
   const handleManualScan = async () => {
+    if (isScannerPaused) return;
     setIsScanningNow(true);
     try {
       await onTriggerManualScan();
@@ -77,28 +85,57 @@ export const ScannerView: React.FC<ScannerViewProps> = ({
       <div className="rounded-xl bg-[#0D121D] border border-slate-800 p-4 shadow-lg">
         <div className="flex items-center justify-between flex-wrap gap-4">
           <div className="flex items-center gap-3">
-            <div className="w-10 h-10 rounded-xl bg-amber-400/10 border border-amber-400/20 flex items-center justify-center text-amber-400">
-              <Radar className={`w-5 h-5 ${isScannerRunning ? 'animate-spin' : ''}`} style={{ animationDuration: '4s' }} />
+            <div className={`w-10 h-10 rounded-xl flex items-center justify-center ${isScannerPaused ? 'bg-amber-500/10 border border-amber-500/20 text-amber-400' : 'bg-amber-400/10 border border-amber-400/20 text-amber-400'}`}>
+              <Radar className={`w-5 h-5 ${isScannerRunning && !isScannerPaused ? 'animate-spin' : ''}`} style={{ animationDuration: '4s' }} />
             </div>
             <div>
               <div className="flex items-center gap-2">
                 <h2 className="text-sm font-bold text-white">السكانر المؤسسي المباشر (Scanner)</h2>
-                <span className="flex items-center gap-1 text-[11px] font-bold px-2 py-0.5 rounded-full bg-emerald-500/10 text-emerald-400 border border-emerald-500/20">
-                  <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
-                  {isScannerRunning ? 'يعمل' : 'متوقف'}
-                </span>
+                {isScannerPaused ? (
+                  <span className="flex items-center gap-1 text-[11px] font-bold px-2 py-0.5 rounded-full bg-amber-500/10 text-amber-400 border border-amber-500/20">
+                    <span className="w-1.5 h-1.5 rounded-full bg-amber-400" />
+                    متوقف مؤقتاً (PAUSED)
+                  </span>
+                ) : (
+                  <span className="flex items-center gap-1 text-[11px] font-bold px-2 py-0.5 rounded-full bg-emerald-500/10 text-emerald-400 border border-emerald-500/20">
+                    <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
+                    {isScannerRunning ? 'يعمل (RUNNING)' : 'متوقف'}
+                  </span>
+                )}
               </div>
               <p className="text-xs text-slate-400 mt-0.5">
-                فحص آلي متواصل لشمعات الذهب XAU/USD وتقييم الاستراتيجيات الست المعتمدة
+                {isScannerPaused
+                  ? 'السكانر في حالة إيقاف مؤقت — متابعة الصفقات المفتوحة والحالية مستمرة بنشاط'
+                  : 'فحص آلي متواصل لشمعات الذهب XAU/USD وتقييم الاستراتيجيات الست المعتمدة'}
               </p>
             </div>
           </div>
 
-          <div className="flex items-center gap-3">
+          <div className="flex items-center gap-2 flex-wrap">
+            {isScannerPaused ? (
+              <button
+                onClick={onResumeScanner}
+                className="px-3.5 py-2 rounded-lg bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-bold text-xs flex items-center gap-1.5 cursor-pointer transition-all shadow-md shadow-emerald-500/10"
+                title="استئناف تشغيل دورات الفحص الآلي"
+              >
+                <Play className="w-3.5 h-3.5 fill-current" />
+                <span>▶️ Resume Scanner (استئناف)</span>
+              </button>
+            ) : (
+              <button
+                onClick={onPauseScanner}
+                className="px-3.5 py-2 rounded-lg bg-amber-500/20 hover:bg-amber-500/30 text-amber-300 border border-amber-500/30 font-bold text-xs flex items-center gap-1.5 cursor-pointer transition-all"
+                title="إيقاف دورات الفحص مع إبقاء مراقبة الصفقات نشطة"
+              >
+                <Pause className="w-3.5 h-3.5 fill-current" />
+                <span>⏸️ Pause Scanner (إيقاف مؤقت)</span>
+              </button>
+            )}
+
             <button
               onClick={handleManualScan}
-              disabled={isScanningNow}
-              className="px-4 py-2 rounded-lg bg-amber-400 hover:bg-amber-300 disabled:opacity-50 text-slate-950 font-bold text-xs flex items-center gap-2 cursor-pointer transition-all shadow-md shadow-amber-500/10"
+              disabled={isScanningNow || isScannerPaused}
+              className="px-4 py-2 rounded-lg bg-amber-400 hover:bg-amber-300 disabled:opacity-40 text-slate-950 font-bold text-xs flex items-center gap-2 cursor-pointer transition-all shadow-md shadow-amber-500/10"
             >
               <RotateCw className={`w-3.5 h-3.5 ${isScanningNow ? 'animate-spin' : ''}`} />
               <span>{isScanningNow ? 'جاري الفحص الآن...' : 'فحص فوري الآن'}</span>
