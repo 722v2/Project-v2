@@ -577,7 +577,13 @@ if (process.env.NODE_ENV === 'production' || process.env.NODE_ENV === 'test' || 
 export { app };
 
 if (process.env.NODE_ENV !== 'test') {
-  app.listen(PORT, '0.0.0.0', () => {
+  app.listen(PORT, '0.0.0.0', async () => {
     console.log(`Gold AI Bot V2 server running on http://0.0.0.0:${PORT}`);
+    try {
+      const { TradingEngine } = await import('../src/services/trading_engine.ts');
+      await TradingEngine.getInstance().start();
+    } catch (err) {
+      console.error('[TradingEngine] Failed to start engine on server boot:', err);
+    }
   });
 }

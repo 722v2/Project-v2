@@ -110,6 +110,7 @@ export class TradingEngine {
   private pollIntervalId: any = null;
   private scannerIntervalId: any = null;
   private monitorIntervalId: any = null;
+  private isEngineStarted = false;
 
   private state: TradingEngineState;
   private config: AppConfig = { ...DEFAULT_CONFIG };
@@ -309,6 +310,14 @@ export class TradingEngine {
    * Initializes real Biquote market connection and starts background scanner and monitor.
    */
   public async start(): Promise<void> {
+    if (this.isEngineStarted) {
+      console.log('[TradingEngine] Engine already started (idempotent guard)');
+      return;
+    }
+    this.isEngineStarted = true;
+    console.log('[TradingEngine] Starting production engine');
+    console.log('[Scanner] Worker started');
+
     // 1. Initial quote & chart fetch
     await Promise.allSettled([
       this.fetchLiveQuote(),
@@ -746,6 +755,8 @@ export class TradingEngine {
     if (this.state.isScanningNow) {
       return;
     }
+
+    console.log('[Scanner] Cycle started');
 
     this.state.isScanningNow = true;
     try {

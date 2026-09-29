@@ -41,11 +41,6 @@ export default function App() {
       setEngineState({ ...newState });
     });
 
-    // 3. Start live Biquote polling and scanner
-    engine.start().catch((err) => {
-      console.error('TradingEngine startup error:', err);
-    });
-
     return () => {
       unsubscribe();
     };
