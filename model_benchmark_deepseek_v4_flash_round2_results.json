@@ -1,0 +1,492 @@
+{
+  "summary": {
+    "benchmarkDate": "2026-09-28T17:54:51.951Z",
+    "totalRequestsRun": 8,
+    "successfulStructuredToolCalls": 8,
+    "toolCallSuccessRatePct": 100,
+    "httpSuccessRatePct": 100,
+    "avgLatencyMs": 10638,
+    "medianLatencyMs": 11831,
+    "totalPromptTokens": 7874,
+    "totalCompletionTokens": 11132,
+    "totalTokens": 19006,
+    "avgTokensPerRequest": 2376,
+    "longCount": 4,
+    "shortCount": 2,
+    "noTradeCount": 2,
+    "malformedCount": 0,
+    "rateLimitFailures": 0,
+    "otherFailures": 0,
+    "metrics": {
+      "correctDirectionCount": 5,
+      "incorrectDirectionCount": 1,
+      "noTradeCorrectnessCount": 2
+    }
+  },
+  "detailedRuns": [
+    {
+      "caseId": "case_001_bullish_sweep",
+      "expectedDecision": "LONG",
+      "status": 200,
+      "latencyMs": 10334,
+      "modelId": "deepseek/deepseek-v4-flash",
+      "finishReason": "tool_calls",
+      "toolCallReturned": true,
+      "toolName": "submit_trade_analysis",
+      "parsedArguments": {
+        "confidence": 0.74,
+        "decision": "LONG",
+        "entry": 2644.5,
+        "reasons": [
+          "HTF trend is UP, providing bullish directional bias",
+          "LTF shows sweep of Equal Lows at $2640 followed by Bullish CHOCH on 5M, confirming a shift in market structure",
+          "Clean 15M Bullish FVG (2643-2645.2) established with heavy buy-volume rejection",
+          "Bullish order block (2641-2643.5) sits beneath price, offering an invalidation zone",
+          "Price is holding above the 200 EMA and recent CL equal lows were swept (liquidity grab)",
+          "MACD bullish and volume ratio 1.45 confirm participation on the reversal"
+        ],
+        "risk_notes": [
+          "Entry is a limit into the FVG/OB confluence zone (2643-2645) rather than a chase of current price",
+          "Stop below the $2640 EQL liquidity pool to invalidate the bullish thesis",
+          "RSI at 42.5 still below 50; prefer fresh buys on a confirmed retracement hold",
+          "Resistance cluster at 2658-2660 may cap upside; scale out at TP1",
+          "Invalidate if price reclaims below 2640 with strong momentum (no CHOCH confirmation)"
+        ],
+        "setup_quality": "HIGH",
+        "stop_loss": 2638,
+        "take_profit_1": 2656,
+        "take_profit_2": 2660
+      },
+      "decision": "LONG",
+      "entry": 2644.5,
+      "stopLoss": 2638,
+      "takeProfit1": 2656,
+      "takeProfit2": 2660,
+      "confidence": 0.74,
+      "setupQuality": "HIGH",
+      "reasons": [
+        "HTF trend is UP, providing bullish directional bias",
+        "LTF shows sweep of Equal Lows at $2640 followed by Bullish CHOCH on 5M, confirming a shift in market structure",
+        "Clean 15M Bullish FVG (2643-2645.2) established with heavy buy-volume rejection",
+        "Bullish order block (2641-2643.5) sits beneath price, offering an invalidation zone",
+        "Price is holding above the 200 EMA and recent CL equal lows were swept (liquidity grab)",
+        "MACD bullish and volume ratio 1.45 confirm participation on the reversal"
+      ],
+      "riskNotes": [
+        "Entry is a limit into the FVG/OB confluence zone (2643-2645) rather than a chase of current price",
+        "Stop below the $2640 EQL liquidity pool to invalidate the bullish thesis",
+        "RSI at 42.5 still below 50; prefer fresh buys on a confirmed retracement hold",
+        "Resistance cluster at 2658-2660 may cap upside; scale out at TP1",
+        "Invalidate if price reclaims below 2640 with strong momentum (no CHOCH confirmation)"
+      ],
+      "promptTokens": 1049,
+      "completionTokens": 1303,
+      "totalTokens": 2352,
+      "error": null
+    },
+    {
+      "caseId": "case_002_bearish_bos",
+      "expectedDecision": "SHORT",
+      "status": 200,
+      "latencyMs": 10365,
+      "modelId": "deepseek/deepseek-v4-flash",
+      "finishReason": "tool_calls",
+      "toolCallReturned": true,
+      "toolName": "submit_trade_analysis",
+      "parsedArguments": {
+        "confidence": 76,
+        "decision": "SHORT",
+        "entry": 2668,
+        "reasons": [
+          "HTF trend strictly down; 1H & 15M structure confirmed bearish",
+          "Bearish BOS broke 15M structure at 2662, price now pulling back into premium",
+          "Price at 61.8% Fib (2665.8) inside Bearish FVG (2665.5-2668) aligning with fresh Bearish OB (2667-2671)",
+          "Rejection zone reinforced by EMA50 (2667.1), key resistance 2670 and EQH 2672",
+          "MACD bearish and RSI 58 in premium after retracement",
+          "Volume ratio 1.3 confirms participation in the pullback to supply"
+        ],
+        "risk_notes": [
+          "Stop placed above EQH/recent high (2672.5) to invalidate structure if broken",
+          "Risk ~$5.5 with TP1 ~2.3R and TP2 ~3.3R for favorable risk-reward",
+          "Confluence zone is tight; spread 0.3 should be accounted for in execution",
+          "If price breaks above 2672.5 EQH, structure invalidates and short should be aborted",
+          "Multiple overlapping supply levels could cause sharp reaction, manage partials at recent low 2655"
+        ],
+        "setup_quality": "HIGH",
+        "stop_loss": 2673.5,
+        "take_profit_1": 2655.5,
+        "take_profit_2": 2650
+      },
+      "decision": "SHORT",
+      "entry": 2668,
+      "stopLoss": 2673.5,
+      "takeProfit1": 2655.5,
+      "takeProfit2": 2650,
+      "confidence": 76,
+      "setupQuality": "HIGH",
+      "reasons": [
+        "HTF trend strictly down; 1H & 15M structure confirmed bearish",
+        "Bearish BOS broke 15M structure at 2662, price now pulling back into premium",
+        "Price at 61.8% Fib (2665.8) inside Bearish FVG (2665.5-2668) aligning with fresh Bearish OB (2667-2671)",
+        "Rejection zone reinforced by EMA50 (2667.1), key resistance 2670 and EQH 2672",
+        "MACD bearish and RSI 58 in premium after retracement",
+        "Volume ratio 1.3 confirms participation in the pullback to supply"
+      ],
+      "riskNotes": [
+        "Stop placed above EQH/recent high (2672.5) to invalidate structure if broken",
+        "Risk ~$5.5 with TP1 ~2.3R and TP2 ~3.3R for favorable risk-reward",
+        "Confluence zone is tight; spread 0.3 should be accounted for in execution",
+        "If price breaks above 2672.5 EQH, structure invalidates and short should be aborted",
+        "Multiple overlapping supply levels could cause sharp reaction, manage partials at recent low 2655"
+      ],
+      "promptTokens": 1048,
+      "completionTokens": 1331,
+      "totalTokens": 2379,
+      "error": null
+    },
+    {
+      "caseId": "case_003_no_trade_low_confluence",
+      "expectedDecision": "NO_TRADE",
+      "status": 200,
+      "latencyMs": 4999,
+      "modelId": "deepseek/deepseek-v4-flash",
+      "finishReason": "tool_calls",
+      "toolCallReturned": true,
+      "toolName": "submit_trade_analysis",
+      "parsedArguments": {
+        "confidence": 15,
+        "decision": "NO_TRADE",
+        "entry": null,
+        "reasons": [
+          "HTF trend is RANGE with no directional bias.",
+          "LTF shows sideways consolidation inside a tight 2650-2655 bracket with no BOS, CHOCH, or liquidity sweep.",
+          "No FVG, no order block reaction, and no liquidity sweep present anywhere on the chart.",
+          "Price is sitting in the middle of the range (2652.1) at premium/discount neutral zone - poor entry location.",
+          "RSI at 50.2 (neutral), EMAs tightly clustered around price, MACD flat - no confluence or momentum.",
+          "Volume at 0.65 vs 24h average indicates very low activity / chop."
+        ],
+        "risk_notes": [
+          "Risk-reward is poor: nearest liquidity is only ~$2-5 away on either side, far under acceptable R:R.",
+          "Low-volume range with no confirmed structure break presents high risk of whipsaw.",
+          "No valid setup qualifies - waiting for a sweep of 2649.8 or a break of 2655 with confirmation is required.",
+          "Given only $2.3 to stop at recent low and no structure signal, staying in cash is the disciplined play."
+        ],
+        "setup_quality": "NONE",
+        "stop_loss": null,
+        "take_profit_1": null,
+        "take_profit_2": null
+      },
+      "decision": "NO_TRADE",
+      "entry": null,
+      "stopLoss": null,
+      "takeProfit1": null,
+      "takeProfit2": null,
+      "confidence": 15,
+      "setupQuality": "NONE",
+      "reasons": [
+        "HTF trend is RANGE with no directional bias.",
+        "LTF shows sideways consolidation inside a tight 2650-2655 bracket with no BOS, CHOCH, or liquidity sweep.",
+        "No FVG, no order block reaction, and no liquidity sweep present anywhere on the chart.",
+        "Price is sitting in the middle of the range (2652.1) at premium/discount neutral zone - poor entry location.",
+        "RSI at 50.2 (neutral), EMAs tightly clustered around price, MACD flat - no confluence or momentum.",
+        "Volume at 0.65 vs 24h average indicates very low activity / chop."
+      ],
+      "riskNotes": [
+        "Risk-reward is poor: nearest liquidity is only ~$2-5 away on either side, far under acceptable R:R.",
+        "Low-volume range with no confirmed structure break presents high risk of whipsaw.",
+        "No valid setup qualifies - waiting for a sweep of 2649.8 or a break of 2655 with confirmation is required.",
+        "Given only $2.3 to stop at recent low and no structure signal, staying in cash is the disciplined play."
+      ],
+      "promptTokens": 904,
+      "completionTokens": 546,
+      "totalTokens": 1450,
+      "error": null
+    },
+    {
+      "caseId": "case_004_conflicting_signals",
+      "expectedDecision": "NO_TRADE",
+      "status": 200,
+      "latencyMs": 13936,
+      "modelId": "deepseek/deepseek-v4-flash",
+      "finishReason": "tool_calls",
+      "toolCallReturned": true,
+      "toolName": "submit_trade_analysis",
+      "parsedArguments": {
+        "confidence": 0.6,
+        "decision": "SHORT",
+        "entry": 2642.5,
+        "reasons": [
+          "HTF (1H/4H) order flow aggressively DOWN aligns with shorts; price below all major EMAs (20/50/200) in full bearish alignment.",
+          "Bearish FVG at 2642-2646 sits directly overhead as a supply zone, providing a clean retracement entry to sell into strength.",
+          "MACD is bearish and below zero, supporting downside continuation (treated as soft confluence, not an entry filter).",
+          "Liquidity rests below at recent low 2635 and key support 2630, giving defined downside targets; bearish rejection under key resistance 2650 confirms structure.",
+          "RSI oversold (28.5) is a naive buy signal and flagged as a likely bull trap within a strong downtrend, favoring the short."
+        ],
+        "risk_notes": [
+          "Oversold RSI may produce a short-term bounce; limit entry strictly to the supply zone rather than chasing the current price at 2638.",
+          "High risk of a bull trap; stop placed above the FVG and key resistance to protect against a false break.",
+          "Volume ratio only 1.1x, lacking strong breakout confirmation for an aggressive move.",
+          "Tight 0.4 spread is favorable, but position size should respect the recent-low support cluster."
+        ],
+        "setup_quality": "MEDIUM",
+        "stop_loss": 2651,
+        "take_profit_1": 2633,
+        "take_profit_2": 2630
+      },
+      "decision": "SHORT",
+      "entry": 2642.5,
+      "stopLoss": 2651,
+      "takeProfit1": 2633,
+      "takeProfit2": 2630,
+      "confidence": 0.6,
+      "setupQuality": "MEDIUM",
+      "reasons": [
+        "HTF (1H/4H) order flow aggressively DOWN aligns with shorts; price below all major EMAs (20/50/200) in full bearish alignment.",
+        "Bearish FVG at 2642-2646 sits directly overhead as a supply zone, providing a clean retracement entry to sell into strength.",
+        "MACD is bearish and below zero, supporting downside continuation (treated as soft confluence, not an entry filter).",
+        "Liquidity rests below at recent low 2635 and key support 2630, giving defined downside targets; bearish rejection under key resistance 2650 confirms structure.",
+        "RSI oversold (28.5) is a naive buy signal and flagged as a likely bull trap within a strong downtrend, favoring the short."
+      ],
+      "riskNotes": [
+        "Oversold RSI may produce a short-term bounce; limit entry strictly to the supply zone rather than chasing the current price at 2638.",
+        "High risk of a bull trap; stop placed above the FVG and key resistance to protect against a false break.",
+        "Volume ratio only 1.1x, lacking strong breakout confirmation for an aggressive move.",
+        "Tight 0.4 spread is favorable, but position size should respect the recent-low support cluster."
+      ],
+      "promptTokens": 954,
+      "completionTokens": 1902,
+      "totalTokens": 2856,
+      "error": null
+    },
+    {
+      "caseId": "case_005_liquidity_sweep_vs_break",
+      "expectedDecision": "LONG",
+      "status": 200,
+      "latencyMs": 14012,
+      "modelId": "deepseek/deepseek-v4-flash",
+      "finishReason": "tool_calls",
+      "toolCallReturned": true,
+      "toolName": "submit_trade_analysis",
+      "parsedArguments": {
+        "confidence": 0.68,
+        "decision": "LONG",
+        "entry": 2638,
+        "reasons": [
+          "Classic Liquidity Sweep of equal lows at $2635 with a sharp 2-point wick below the key level and a strong close back inside the range on 2.1x volume - the 'not a genuine breakdown' context confirms a bullish rejection of swept sell-side liquidity",
+          "Price closed strongly back above key support $2635, setting up a spring/liquidity-grab continuation toward premium ($2652 recent high / $2655 resistance)",
+          "Bullish FVG (2636.5-2638.5) sits just below/at current price, providing a defined confluence zone and support for the long bias",
+          "Price is above EMA20 (2637.5), MACD histogram is positive and turning higher (bullish), corroborating the reversal setup",
+          "Retail stop-losses parked below $2635 equal lows provide fuel for upside continuation"
+        ],
+        "risk_notes": [
+          "HTF trend is RANGE bound between $2635 and $2655, capping upside - take profit into the 2652-2655 resistance zone rather than holding",
+          "RSI at 48 is neutral with no momentum confirmation of a strong directional trend",
+          "Stop is placed below the sweep low ($2633) to invalidate the bullish thesis; the trade is invalid if this level is lost",
+          "Range context warrants scaling out at TP1 (2652) and limiting extended exposure toward key resistance"
+        ],
+        "setup_quality": "HIGH",
+        "stop_loss": 2631.5,
+        "take_profit_1": 2652,
+        "take_profit_2": 2655
+      },
+      "decision": "LONG",
+      "entry": 2638,
+      "stopLoss": 2631.5,
+      "takeProfit1": 2652,
+      "takeProfit2": 2655,
+      "confidence": 0.68,
+      "setupQuality": "HIGH",
+      "reasons": [
+        "Classic Liquidity Sweep of equal lows at $2635 with a sharp 2-point wick below the key level and a strong close back inside the range on 2.1x volume - the 'not a genuine breakdown' context confirms a bullish rejection of swept sell-side liquidity",
+        "Price closed strongly back above key support $2635, setting up a spring/liquidity-grab continuation toward premium ($2652 recent high / $2655 resistance)",
+        "Bullish FVG (2636.5-2638.5) sits just below/at current price, providing a defined confluence zone and support for the long bias",
+        "Price is above EMA20 (2637.5), MACD histogram is positive and turning higher (bullish), corroborating the reversal setup",
+        "Retail stop-losses parked below $2635 equal lows provide fuel for upside continuation"
+      ],
+      "riskNotes": [
+        "HTF trend is RANGE bound between $2635 and $2655, capping upside - take profit into the 2652-2655 resistance zone rather than holding",
+        "RSI at 48 is neutral with no momentum confirmation of a strong directional trend",
+        "Stop is placed below the sweep low ($2633) to invalidate the bullish thesis; the trade is invalid if this level is lost",
+        "Range context warrants scaling out at TP1 (2652) and limiting extended exposure toward key resistance"
+      ],
+      "promptTokens": 981,
+      "completionTokens": 1911,
+      "totalTokens": 2892,
+      "error": null
+    },
+    {
+      "caseId": "case_006_reversal_setup",
+      "expectedDecision": "LONG",
+      "status": 200,
+      "latencyMs": 12956,
+      "modelId": "deepseek/deepseek-v4-flash",
+      "finishReason": "tool_calls",
+      "toolCallReturned": true,
+      "toolName": "submit_trade_analysis",
+      "parsedArguments": {
+        "confidence": 0.55,
+        "decision": "LONG",
+        "entry": 2616.5,
+        "reasons": [
+          "15M bullish CHOCH confirmed breaking $2616 resistance, shifting LTF structure bullish",
+          "Price respected the 1D key demand zone ($2610-$2615) after multi-day decline",
+          "Bullish order block ($2611-$2614.5) and bullish FVG ($2615-$2617.8) provide stacked confluence",
+          "MACD bullish line/signal cross with expanding histogram and volume ratio of 1.6 shows participation",
+          "RSI at 52 neutral, leaving room for continued upside"
+        ],
+        "risk_notes": [
+          "HTF trend is CHOPPY with no strong directional alignment",
+          "Price is trading in premium (above equilibrium ~2617.6) and approaching key resistance at 2630",
+          "EMA200 at 2635 reflects longer-term bearish pressure that could reject price",
+          "Limited reward before 2625-2630 resistance caps upside; prefer entry on FVG retest rather than chasing",
+          "If 2610 support fails, the demand-zone thesis is invalidated"
+        ],
+        "setup_quality": "MEDIUM",
+        "stop_loss": 2609,
+        "take_profit_1": 2625,
+        "take_profit_2": 2630
+      },
+      "decision": "LONG",
+      "entry": 2616.5,
+      "stopLoss": 2609,
+      "takeProfit1": 2625,
+      "takeProfit2": 2630,
+      "confidence": 0.55,
+      "setupQuality": "MEDIUM",
+      "reasons": [
+        "15M bullish CHOCH confirmed breaking $2616 resistance, shifting LTF structure bullish",
+        "Price respected the 1D key demand zone ($2610-$2615) after multi-day decline",
+        "Bullish order block ($2611-$2614.5) and bullish FVG ($2615-$2617.8) provide stacked confluence",
+        "MACD bullish line/signal cross with expanding histogram and volume ratio of 1.6 shows participation",
+        "RSI at 52 neutral, leaving room for continued upside"
+      ],
+      "riskNotes": [
+        "HTF trend is CHOPPY with no strong directional alignment",
+        "Price is trading in premium (above equilibrium ~2617.6) and approaching key resistance at 2630",
+        "EMA200 at 2635 reflects longer-term bearish pressure that could reject price",
+        "Limited reward before 2625-2630 resistance caps upside; prefer entry on FVG retest rather than chasing",
+        "If 2610 support fails, the demand-zone thesis is invalidated"
+      ],
+      "promptTokens": 989,
+      "completionTokens": 1707,
+      "totalTokens": 2696,
+      "error": null
+    },
+    {
+      "caseId": "case_007_messy_ambiguous",
+      "expectedDecision": "NO_TRADE",
+      "status": 200,
+      "latencyMs": 6667,
+      "modelId": "deepseek/deepseek-v4-flash",
+      "finishReason": "tool_calls",
+      "toolCallReturned": true,
+      "toolName": "submit_trade_analysis",
+      "parsedArguments": {
+        "confidence": 0.3,
+        "decision": "NO_TRADE",
+        "entry": null,
+        "reasons": [
+          "High-impact CPI release driving wild $20+ price whips within minutes makes technical levels unreliable and unpredictable.",
+          "HTF trend is CHOPPY with no directional bias; price is whipsawing between 2642 and 2675 with no confirmed BOS/CHOCH structure.",
+          "Extreme spread of $1.80 (vs. typical <$1 for XAUUSD) materially raises transaction costs and slippage risk.",
+          "Indicators are flat/neutral: RSI 14 at 51.5, EMAs clustered (2654-2656), MACD flat — no momentum or directional confluence.",
+          "2-way wicks spanning ~$33 in 5 minutes indicate severe stop-hunt risk and unreliable key levels."
+        ],
+        "risk_notes": [
+          "Extreme volatility hazard: protective stops may be triggered by aggressive wicks in either direction.",
+          "Do not enter during high-impact news release; allow time for price to consolidate and liquidity to settle.",
+          "Spread widening may lead to adverse fills; risk/reward cannot be reliably assessed in current conditions."
+        ],
+        "setup_quality": "NONE",
+        "stop_loss": null,
+        "take_profit_1": null,
+        "take_profit_2": null
+      },
+      "decision": "NO_TRADE",
+      "entry": null,
+      "stopLoss": null,
+      "takeProfit1": null,
+      "takeProfit2": null,
+      "confidence": 0.3,
+      "setupQuality": "NONE",
+      "reasons": [
+        "High-impact CPI release driving wild $20+ price whips within minutes makes technical levels unreliable and unpredictable.",
+        "HTF trend is CHOPPY with no directional bias; price is whipsawing between 2642 and 2675 with no confirmed BOS/CHOCH structure.",
+        "Extreme spread of $1.80 (vs. typical <$1 for XAUUSD) materially raises transaction costs and slippage risk.",
+        "Indicators are flat/neutral: RSI 14 at 51.5, EMAs clustered (2654-2656), MACD flat — no momentum or directional confluence.",
+        "2-way wicks spanning ~$33 in 5 minutes indicate severe stop-hunt risk and unreliable key levels."
+      ],
+      "riskNotes": [
+        "Extreme volatility hazard: protective stops may be triggered by aggressive wicks in either direction.",
+        "Do not enter during high-impact news release; allow time for price to consolidate and liquidity to settle.",
+        "Spread widening may lead to adverse fills; risk/reward cannot be reliably assessed in current conditions."
+      ],
+      "promptTokens": 900,
+      "completionTokens": 784,
+      "totalTokens": 1684,
+      "error": null
+    },
+    {
+      "caseId": "case_008_repeat_bullish_sweep",
+      "expectedDecision": "LONG",
+      "status": 200,
+      "latencyMs": 11831,
+      "modelId": "deepseek/deepseek-v4-flash",
+      "finishReason": "tool_calls",
+      "toolCallReturned": true,
+      "toolName": "submit_trade_analysis",
+      "parsedArguments": {
+        "confidence": 0.74,
+        "decision": "LONG",
+        "entry": 2644.5,
+        "reasons": [
+          "HTF trend is TREND_UP, supporting a long bias on the pullback",
+          "5M sweep of the EQL (2640) followed by a Bullish CHOCH indicates a liquidity grab + market structure shift",
+          "Price wicked below the major $2640 EQL pool and rejected with heavy buy volume, leaving a clean 15M Bullish FVG",
+          "Price is holding above the 200 EMA (2638.1) and above all EMAs (20/50/200), reflecting underlying bullish structure",
+          "Bullish OB (2641-2643.5) converges with the bullish FVG (2643-2645.2) and key fib levels (50% at 2645, 61.8% at 2642.5) forming a high-confluence entry zone",
+          "Elevated volume24hRatio (1.45) with heavy buy volume on the sweep confirms institutional participation",
+          "MACD histogram positive and bullish as supporting confirmation"
+        ],
+        "risk_notes": [
+          "Entry selected on pullback into the 2643-2645 confluence; chasing at current price 2646.5 reduces reward-to-risk",
+          "RSI at 42.5 sits below 50, so momentum is not yet fully confirmed bullsided",
+          "TP1 at recent high 2658 and key resistance 2660 may cap upside and act as profit-taking zones",
+          "Stop placed below the swept EQL and OB lows to invalidate the bullish reversal thesis",
+          "Bank on 0.3 spread and monitor for news-driven volatility around key levels"
+        ],
+        "setup_quality": "HIGH",
+        "stop_loss": 2639,
+        "take_profit_1": 2658,
+        "take_profit_2": 2661
+      },
+      "decision": "LONG",
+      "entry": 2644.5,
+      "stopLoss": 2639,
+      "takeProfit1": 2658,
+      "takeProfit2": 2661,
+      "confidence": 0.74,
+      "setupQuality": "HIGH",
+      "reasons": [
+        "HTF trend is TREND_UP, supporting a long bias on the pullback",
+        "5M sweep of the EQL (2640) followed by a Bullish CHOCH indicates a liquidity grab + market structure shift",
+        "Price wicked below the major $2640 EQL pool and rejected with heavy buy volume, leaving a clean 15M Bullish FVG",
+        "Price is holding above the 200 EMA (2638.1) and above all EMAs (20/50/200), reflecting underlying bullish structure",
+        "Bullish OB (2641-2643.5) converges with the bullish FVG (2643-2645.2) and key fib levels (50% at 2645, 61.8% at 2642.5) forming a high-confluence entry zone",
+        "Elevated volume24hRatio (1.45) with heavy buy volume on the sweep confirms institutional participation",
+        "MACD histogram positive and bullish as supporting confirmation"
+      ],
+      "riskNotes": [
+        "Entry selected on pullback into the 2643-2645 confluence; chasing at current price 2646.5 reduces reward-to-risk",
+        "RSI at 42.5 sits below 50, so momentum is not yet fully confirmed bullsided",
+        "TP1 at recent high 2658 and key resistance 2660 may cap upside and act as profit-taking zones",
+        "Stop placed below the swept EQL and OB lows to invalidate the bullish reversal thesis",
+        "Bank on 0.3 spread and monitor for news-driven volatility around key levels"
+      ],
+      "promptTokens": 1049,
+      "completionTokens": 1648,
+      "totalTokens": 2697,
+      "error": null
+    }
+  ]
+}

@@ -1,0 +1,232 @@
+[
+  {
+    "caseId": "case_004_conflicting_signals",
+    "expectedDecision": "NO_TRADE",
+    "previousDecision": "SHORT",
+    "newDecision": "NO_TRADE",
+    "decisionChanged": true,
+    "status": 200,
+    "latencyMs": 10247,
+    "finishReason": "tool_calls",
+    "toolCallReturned": true,
+    "parsedArguments": {
+      "confidence": 0.2,
+      "decision": "NO_TRADE",
+      "entry": null,
+      "reasons": [
+        "Material conflict: oversold RSI (28.5) gives a naive buy signal, but HTF trend is strongly bearish with 1H/4H order flow aggressively DOWN.",
+        "Price is below all major EMAs (20/50/200) and MACD is bearish, confirming sustained downside momentum with no confirmed bullish reversal.",
+        "A bearish FVG (2642–2646) and resistance at 2650 sit overhead, making any bounce limited upside and creating elevated bull-trap risk.",
+        "A short is not viable either, as price is bouncing off local support (2635) with key support at 2630 nearby, yielding poor risk/reward.",
+        "No confirmed liquidity sweep, no clear CHOCH/market-structure shift, and contradictory timeframe/indicator signals mean no high-confluence setup exists."
+      ],
+      "risk_notes": [
+        "Oversold RSI buy signal directly contradicts aggressive bearish higher-timeframe flow (bull-trap warning).",
+        "Shorting near key support (2630) risks a short squeeze off the local bounce.",
+        "No confirmation of a liquidity reaction or decisive break before committing capital.",
+        "Preserving Gold AI Bot V2 risk rules: no entry without full confluence; spread 0.4 and broadly conflicting evidence favor standing aside."
+      ],
+      "setup_quality": "NONE",
+      "stop_loss": null,
+      "take_profit_1": null,
+      "take_profit_2": null
+    },
+    "promptTokens": 1159,
+    "completionTokens": 1137,
+    "totalTokens": 2296,
+    "error": null
+  },
+  {
+    "caseId": "case_001_bullish_sweep",
+    "expectedDecision": "LONG",
+    "previousDecision": "LONG",
+    "newDecision": "LONG",
+    "decisionChanged": false,
+    "status": 200,
+    "latencyMs": 10079,
+    "finishReason": "tool_calls",
+    "toolCallReturned": true,
+    "parsedArguments": {
+      "confidence": 0.7,
+      "decision": "LONG",
+      "entry": 2646.5,
+      "reasons": [
+        "HTF trend is UP and aligns with lower-timeframe bullish structure (Sweep of Equal Lows -> Bullish CHOCH on 5M).",
+        "Clean sweep of the major $2640 EQL liquidity pool ($0.50 below) with immediate rejection and heavy buy volume (volume ratio 1.45) - a classic liquidity grab.",
+        "Price left a clean 15M Bullish FVG (2643-2645.2) and is holding above a Bullish OB (2641-2643.5) and above the 200 EMA (2638.1).",
+        "Price is above EMA20 (2645.8) and EMA50 (2644.2); MACD is bullish (line 0.85 > signal 0.4, positive histogram).",
+        "Long confirmation aligns with key support zone at 2640 and Fib 50%/61.8% retracement confluence."
+      ],
+      "risk_notes": [
+        "RSI at 42.5 is below 50 — recovery momentum still developing; avoid adding aggressively until momentum confirms.",
+        "Risk per Gold AI Bot V2 rules: keep position size consistent with fixed risk cap; stop set below the swept liquidity low at 2639.5.",
+        "TP1 targets the key resistance/recent high at 2658; TP2 targets extension above 2660, require confirmation at resistance.",
+        "If price rejects back below 2640 (ineffective sweep / failed CHOCH), the long thesis is invalidated - honor the stop."
+      ],
+      "setup_quality": "HIGH",
+      "stop_loss": 2638.5,
+      "take_profit_1": 2658,
+      "take_profit_2": 2665
+    },
+    "promptTokens": 1254,
+    "completionTokens": 1283,
+    "totalTokens": 2537,
+    "error": null
+  },
+  {
+    "caseId": "case_002_bearish_bos",
+    "expectedDecision": "SHORT",
+    "previousDecision": "SHORT",
+    "newDecision": "SHORT",
+    "decisionChanged": false,
+    "status": 200,
+    "latencyMs": 13143,
+    "finishReason": "tool_calls",
+    "toolCallReturned": true,
+    "parsedArguments": {
+      "confidence": 0.7,
+      "decision": "SHORT",
+      "entry": 2666.8,
+      "reasons": [
+        "HTF trend (1H) strictly bearish and LTF Structure confirmed Bearish BOS at $2662.00 — both timeframes aligned in direction (no conflict).",
+        "Price has pulled back into the premium zone at the 61.8% Fib ($2665.8) which aligns with a fresh Bearish Order Block ($2667–2671) and Bearish FVG ($2665.5–2668) — classic retracement-into-premium continuation short entry.",
+        "Equal Highs at $2672 capped below the top of the bearish OB, providing a clean invalidation level.",
+        "Supporting confluence: MACD bearish (line/signal/histogram negative), price below EMA50 ($2667.1) and EMA200 ($2675.4), bearish EMA stack.",
+        "Price action shows a confirmed 15M break with pullback setup — the short relies on rejection from the OB/FVG premium zone."
+      ],
+      "risk_notes": [
+        "RSI at 58 is not overbought and sits above 50, indicating mild upside momentum during the pullback — require a clear rejection/pin from the OB before committing full size.",
+        "Entry sits at bottom edge of the FVG/OB; use a tight stop above the EQH ($2672) to neutralize the bear-trap risk.",
+        "No confirmation of EMAs cross on lower timeframes; EMAs are only supporting confluence, not primary trigger.",
+        "Volume ratio elevated at 1.3 — watch for expansion on the reversal candle to validate seller intent.",
+        "Spread of 0.3 within acceptable range; apply standard Gold AI Bot V2 risk rules (fixed % risk, no martingale)."
+      ],
+      "setup_quality": "HIGH",
+      "stop_loss": 2673,
+      "take_profit_1": 2655.5,
+      "take_profit_2": 2650
+    },
+    "promptTokens": 1253,
+    "completionTokens": 1696,
+    "totalTokens": 2949,
+    "error": null
+  },
+  {
+    "caseId": "case_003_no_trade_low_confluence",
+    "expectedDecision": "NO_TRADE",
+    "previousDecision": "NO_TRADE",
+    "newDecision": "NO_TRADE",
+    "decisionChanged": false,
+    "status": 200,
+    "latencyMs": 6508,
+    "finishReason": "tool_calls",
+    "toolCallReturned": true,
+    "parsedArguments": {
+      "confidence": 0.3,
+      "decision": "NO_TRADE",
+      "entry": null,
+      "reasons": [
+        "HTF trend is RANGE and price sits in the dead middle of a tight $5 bracket (2650-2655) with no bias toward either boundary",
+        "No market structure break (no BOS/CHOCH) and no liquidity sweep of 2649.8 low or 2655 high - price is just chopping sideways",
+        "No high-confluence zones present: no fresh order block reaction, no FVG, and price is not at either key support (2645) or resistance (2660)",
+        "Indicators are entirely neutral/flat: RSI 50.2, EMAs 20/50/200 all bunched within ~0.25 of each other, and MACD flat near zero",
+        "Volume is low (0.65 ratio) confirming low-participation chop; risk-reward at mid-range is poor with no defined invalidation",
+        "Context notes explicitly flag poor risk-reward with no structure break, FVG, or order-block reaction - no confirmation for either direction",
+        "Per the conflict-resolution policy, absence of a confirmed, high-confluence setup and contradictory/flat signals require NO_TRADE rather than forcing a directional bias"
+      ],
+      "risk_notes": [
+        "No trade entered - preserves Gold AI Bot V2 risk rules by avoiding a low-quality, low-reward mid-range setup",
+        "Low volume environment increases false-breakout risk if price eventually reaches range extremes",
+        "Wait for a liquidity sweep of the 2649.8 low or 2655 high with a subsequent BOS/CHOCH and an order-block/FVG reaction before considering entry",
+        "Range context (HTF) means any trade should only be considered as a range-bound scalp, not a trend trade",
+        "Re-evaluate on a higher timeframe for clearer directional context before acting"
+      ],
+      "setup_quality": "NONE",
+      "stop_loss": null,
+      "take_profit_1": null,
+      "take_profit_2": null
+    },
+    "promptTokens": 1109,
+    "completionTokens": 718,
+    "totalTokens": 1827,
+    "error": null
+  },
+  {
+    "caseId": "case_007_messy_ambiguous",
+    "expectedDecision": "NO_TRADE",
+    "previousDecision": "NO_TRADE",
+    "newDecision": "NO_TRADE",
+    "decisionChanged": false,
+    "status": 200,
+    "latencyMs": 9823,
+    "finishReason": "tool_calls",
+    "toolCallReturned": true,
+    "parsedArguments": {
+      "confidence": 0.85,
+      "decision": "NO_TRADE",
+      "entry": null,
+      "reasons": [
+        "HTF trend is CHOPPY with no directional bias, providing no trend edge.",
+        "LTF structure is chaotic — wild $20 two-way whipsaws in 2 minutes following the CPI release; no clean BOS/CHOCH, order block, or FVG is readable.",
+        "Indicators are fully neutral/flat: RSI 51.5, EMAs (2654-2656) clustered flat, MACD line 0 / signal 0.1 / histogram -0.1, confirming zero momentum.",
+        "Price sits near the midpoint (2658) of the 2642-2675 range (~50%), i.e., equilibrium — no premium/discount edge.",
+        "Extreme spread ($1.80) materially degrades entry/exit precision and violates risk-management integrity.",
+        "Explicit context warning: technical levels are unreliable and volatility is hazardous — a high-impact news trap environment.",
+        "Liquidity behavior is unreadable: wicks span $33 in both directions, consistent with stop-run/trap risk rather than a confirmable sweep."
+      ],
+      "risk_notes": [
+        "Do not trade during the ongoing high-impact CPI aftermath; wait for spread to normalize (~$0.30-0.50) and volatility to compress.",
+        "Require fresh structure formation (clean BOS/CHOCH with retest) after market stabilization before considering any new setup.",
+        "Treat any apparent sweep or breakout within this window as a probable false signal / bull/bear trap.",
+        "If re-evaluating later, HTF remains CHOPPY — a directional trade would still need strong LTF confluence and cannot rely on trend bias.",
+        "Preserve Gold AI Bot V2 risk caps: no entries while spread is 3x+ normal or during news whipsaw regime."
+      ],
+      "setup_quality": "NONE",
+      "stop_loss": null,
+      "take_profit_1": null,
+      "take_profit_2": null
+    },
+    "promptTokens": 1180,
+    "completionTokens": 1140,
+    "totalTokens": 2320,
+    "error": null
+  },
+  {
+    "caseId": "case_008_repeat_bullish_sweep",
+    "expectedDecision": "LONG",
+    "previousDecision": "LONG",
+    "newDecision": "LONG",
+    "decisionChanged": false,
+    "status": 200,
+    "latencyMs": 14305,
+    "finishReason": "tool_calls",
+    "toolCallReturned": true,
+    "parsedArguments": {
+      "confidence": 0.72,
+      "decision": "LONG",
+      "entry": 2645,
+      "reasons": [
+        "HTF trend is UP and aligns with the LTF Bullish CHOCH following an EQL sweep at 2640 - directionally coherent across timeframes.",
+        "Price wicked just below the major $2640 EQL liquidity pool and was rejected with heavy buy volume (volume ratio 1.45), a classic liquidity sweep with strong absorption.",
+        "The rejection left a clean 15M Bullish FVG (2643-2645.2) that overlaps with the Bullish Order Block (2641-2643.5), creating a stacked bullish zone directly below price.",
+        "Price is holding above the 200 EMA (2638.1) and EMA20/50 (2645.8/2644.2), confirming the broader bullish structure is intact.",
+        "MACD is bullish (positive histogram, line above signal) serving as supporting confluence.",
+        "Fib 50% (2645) and 61.8% (2642.5) retracement zone aligns with the FVG/OB, offering logical entry context."
+      ],
+      "risk_notes": [
+        "RSI at 42.5 sits below 50, indicating momentum has not yet fully confirmed the bullish turn - watch for prolonged consolidation before upside continuation.",
+        "Immediate overhead resistance at recent high 2658 and key resistance 2660 may cap upside, warranting partial profit-taking at TP1.",
+        "A tight stop below the swept low (2639.5) is required; be mindful of spread (0.3) and slippage near the liquidity pool.",
+        "15M trade horizon - monitor HTF for any trend invalidation if price breaks below 2640 on volume."
+      ],
+      "setup_quality": "HIGH",
+      "stop_loss": 2638.5,
+      "take_profit_1": 2655,
+      "take_profit_2": 2660
+    },
+    "promptTokens": 1254,
+    "completionTokens": 1812,
+    "totalTokens": 3066,
+    "error": null
+  }
+]

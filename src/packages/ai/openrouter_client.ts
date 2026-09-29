@@ -51,9 +51,10 @@ export class OpenRouterClient {
       'https://openrouter.ai/api/v1'
     ).replace(/\/+$/, '');
     this.apiKey =
-      config?.apiKey !== undefined
-        ? config.apiKey
-        : ((typeof process !== 'undefined' ? process.env.OPENROUTER_API_KEY : '') || '');
+      config?.apiKey ??
+      (typeof process !== 'undefined'
+        ? (process.env.NOVITA_API_KEY || process.env.OPENROUTER_API_KEY || '')
+        : '');
     this.model =
       config?.model ||
       (typeof process !== 'undefined' ? process.env.AI_MODEL : '') ||
@@ -174,11 +175,17 @@ export class OpenRouterClient {
     }
   }
 
-  /**
-   * Interprets deterministic technical structure.
-   * AI MUST NOT invent market prices or bypass deterministic validation.
-   * Deterministic calculations (entry, stop loss, take profit, risk sizing) remain 100% authoritative.
-   */
+  public static readonly CONFLICT_RESOLUTION_POLICY = `
+CONFLICT-RESOLUTION POLICY:
+- NO_TRADE is valid and preferred when evidence is materially conflicting.
+- A higher-timeframe trend by itself is NOT sufficient for entry.
+- If HTF direction conflicts with LTF structure, liquidity behavior, price action, or other major context, do not automatically follow the HTF trend.
+- If there is a warning of bull trap, bear trap, conflicting structure, failed confirmation, unclear liquidity reaction, or contradictory timeframe signals, require additional confirmation; otherwise, return NO_TRADE.
+- Never force a trade merely because one timeframe has a directional bias.
+- A trade requires meaningful confluence.
+- MACD remains ONLY a supporting confluence factor and must never override conflicting structural evidence.
+- If the evidence is balanced or contradictory, choose NO_TRADE.`;
+
   public async interpretSetup(context: {
     symbol: string;
     strategy: string;
@@ -193,7 +200,6 @@ export class OpenRouterClient {
     newsContext?: string;
   }): Promise<AIReasoningResult> {
     const startTime = Date.now();
-
     if (!this.isConfigured()) {
       return {
         success: false,
@@ -202,35 +208,14 @@ export class OpenRouterClient {
         error: 'OPENROUTER_API_KEY not configured. Deterministic analysis remains authoritative.',
       };
     }
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), this.timeoutMs);
 
     try {
-      const prompt = `You are an institutional quantitative market analyst reviewing a pre-validated setup for ${context.symbol}.
-Strategy: ${context.strategy}
-Direction: ${context.direction}
-Pre-calculated Entry: $${context.entryPrice}
-Pre-calculated Stop Loss: $${context.stopLoss}
-Pre-calculated TP1: $${context.takeProfit1}
-${context.takeProfit2 ? `Pre-calculated TP2: $${context.takeProfit2}` : ''}
-Market Regime: ${context.regime}
-Quality Score: ${context.qualityScore ?? 75}/100
-Deterministic Reasons: ${context.reasons.join('; ')}
-${context.newsContext ? `News Context: ${context.newsContext}` : ''}
-
-CRITICAL RULES:
-1. Do NOT invent prices, candles, or indicators.
-2. Provide a structured 2-sentence institutional synthesis covering: (a) confluence summary, (b) key risk advisory.`;
-
-      const controller = new AbortController();
-      const timer = setTimeout(() => controller.abort(), this.timeoutMs);
-
+      const prompt = `Review this setup for ${context.symbol}. Reasons: ${context.reasons.join('; ')}. Rules: ${OpenRouterClient.CONFLICT_RESOLUTION_POLICY}`;
       const res = await fetch(`${this.baseUrl}/chat/completions`, {
         method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          Authorization: `Bearer ${this.apiKey}`,
-          'HTTP-Referer': 'https://gold-ai-bot.v2',
-          'X-Title': 'Gold AI Bot V2',
-        },
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${this.apiKey}` },
         body: JSON.stringify({
           model: this.model,
           messages: [{ role: 'user', content: prompt }],
@@ -239,49 +224,86 @@ CRITICAL RULES:
         }),
         signal: controller.signal,
       });
-
       clearTimeout(timer);
-      const latencyMs = Date.now() - startTime;
-
-      if (!res.ok) {
-        return {
-          success: false,
-          provider: 'openrouter',
-          modelUsed: this.model,
-          latencyMs,
-          error: `OpenRouter returned HTTP ${res.status}: ${res.statusText}`,
-        };
-      }
-
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
       const data = await res.json();
-      const text = data.choices?.[0]?.message?.content || '';
-
       return {
         success: true,
-        explanation: text,
-        confluenceSummary: text,
-        marketContext: context.regime,
-        strategyContext: context.strategy,
-        newsContext: context.newsContext,
+        explanation: data.choices?.[0]?.message?.content || '',
         provider: 'openrouter',
         modelUsed: this.model,
-        latencyMs,
+        latencyMs: Date.now() - startTime,
       };
     } catch (err: any) {
-      const latencyMs = Date.now() - startTime;
+      clearTimeout(timer);
       const isTimeout = err.name === 'AbortError' || err.message?.includes('timeout') || err.message?.includes('aborted');
-
       return {
         success: false,
         provider: 'openrouter',
         modelUsed: this.model,
-        latencyMs,
+        latencyMs: Date.now() - startTime,
         error: isTimeout
           ? `AI reasoning timed out after ${this.timeoutMs}ms (AI_REASONING_TIMEOUT_MS enforced)`
           : this.sanitizeError(err),
       };
     }
   }
+
+  private readonly toolSchema = {
+    type: 'function',
+    function: {
+      name: 'submit_trade_analysis',
+      description: 'Return the final structured XAUUSD analysis.',
+      parameters: {
+        type: 'object',
+        properties: {
+          decision: { type: 'string', enum: ['LONG', 'SHORT', 'NO_TRADE'] },
+          entry: { type: ['number', 'null'] },
+          stop_loss: { type: ['number', 'null'] },
+          take_profit_1: { type: ['number', 'null'] },
+          take_profit_2: { type: ['number', 'null'] },
+          confidence: { type: 'number' },
+          setup_quality: { type: 'string', enum: ['HIGH', 'MEDIUM', 'LOW', 'NONE'] },
+          reasons: { type: 'array', items: { type: 'string' } },
+          risk_notes: { type: 'array', items: { type: 'string' } }
+        },
+        required: ['decision', 'entry', 'stop_loss', 'take_profit_1', 'take_profit_2', 'confidence', 'setup_quality', 'reasons', 'risk_notes']
+      }
+    }
+  };
+
+  public async analyzeSetupWithTools(snapshot: any): Promise<any> {
+    const prompt = `Analyze this technical market snapshot: ${JSON.stringify(snapshot)}
+    CRITICAL RULES:
+    ${OpenRouterClient.CONFLICT_RESOLUTION_POLICY}
+    `;
+
+    const payload = {
+      model: this.model,
+      messages: [{ role: 'user', content: prompt }],
+      temperature: 0.2,
+      max_tokens: 2500,
+      tools: [this.toolSchema],
+      tool_choice: { type: 'function', function: { name: 'submit_trade_analysis' } }
+    };
+
+    const res = await fetch(`${this.baseUrl}/chat/completions`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${this.apiKey}`
+      },
+      body: JSON.stringify(payload)
+    });
+
+    if (!res.ok) throw new Error(`API error: ${res.status}`);
+    const data = await res.json();
+    const toolCall = data.choices?.[0]?.message?.tool_calls?.[0];
+    if (!toolCall) throw new Error('No tool call returned');
+
+    return JSON.parse(toolCall.function.arguments);
+  }
+
 }
 
 export const openRouterClient = new OpenRouterClient();
